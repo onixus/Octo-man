@@ -1,20 +1,23 @@
 # Network Scan CLI (Containerized)
 
+English is the primary documentation language.  
+For a Russian version with extra operational recommendations, see [README.ru.md](README.ru.md).
+
 Reproducible CLI pipeline for scanning large networks:
 - input: `CIDR + IP + FQDN`
-- stages: resolve -> discovery -> fast ports -> Nmap NSE
-- output: JSON/JSONL/CSV + Markdown/HTML summary
+- stages: `resolve -> discovery -> fast ports -> Nmap NSE`
+- output: `JSON/JSONL/CSV` + `Markdown/HTML` summary
 
 ## What It Implements
 
 - Input contract with validation and normalization.
 - Speed profiles: `safe`, `balanced`, `fast`.
-- DNS resolve for FQDN (`dnsx`).
-- Host discovery and fast TCP port scan (`naabu`).
+- DNS resolve for FQDN via `dnsx`.
+- Host discovery and fast TCP port scan via `naabu`.
 - Enrichment with Nmap `-sV` and NSE profiles.
-- Retry + timeout handling per command.
+- Retry + timeout handling per external command.
 - Checkpoint/resume support.
-- Report exports with summary and parsed Nmap services.
+- Report exports with summary and parsed Nmap service data.
 
 ## Project Layout
 
@@ -31,7 +34,7 @@ Reproducible CLI pipeline for scanning large networks:
 
 ### `scanner/inputs/ranges.txt`
 
-Supports one target per line:
+One target per line:
 - CIDR (`10.0.0.0/16`)
 - single IP (`10.0.1.10`, `2001:db8::1`)
 
@@ -43,13 +46,15 @@ One FQDN per line:
 
 ### `scanner/inputs/ports.txt` (optional)
 
-Custom port selectors (one per line). If empty, `top-ports` from profile is used.
+Custom port selectors (one per line).  
+If empty, `top-ports` from selected profile are used.
+
 Examples:
 - `22`
 - `80,443,8443`
 - `1-1024`
 
-Invalid lines are collected in `scanner/output/normalized/contract_validation.json`.
+Invalid lines are written to `scanner/output/normalized/contract_validation.json`.
 
 ## Usage
 
@@ -78,22 +83,22 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
 docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced --resume
 ```
 
-## Validation helpers
+## Validation Helpers
 
 - `scripts/smoke.sh`:
-  - compiles Python sources
-  - runs pipeline with current inputs
+  - compiles Python sources;
+  - runs pipeline with current input files.
 - `scripts/load-test.sh <cidr>`:
-  - writes a temporary CIDR target
-  - runs the `fast` profile in container
+  - writes a temporary CIDR target;
+  - runs `fast` profile in container.
 
-## Modes
+## Profiles
 
-- `safe`: lower packet rate, `top-100`, conservative timing
-- `balanced`: default, `top-1000`
-- `fast`: high-rate discovery/scan, `top-1000`
+- `safe`: lower packet rate, `top-100`, conservative timing.
+- `balanced`: default profile, `top-1000`.
+- `fast`: higher discovery/scan rate, `top-1000`.
 
-Tune in `scanner/config/default.yaml`.
+Tune profile parameters in `scanner/config/default.yaml`.
 
 ## Output Artifacts
 
@@ -111,7 +116,7 @@ Tune in `scanner/config/default.yaml`.
 
 ## Notes
 
-- Intended for authorized environments only.
-- Run from Linux host/network where raw scanning is permitted.
+- Use only in environments where you are authorized to scan.
+- Prefer running from a Linux host/network where raw scanning is allowed.
 - High-rate profiles can trigger IDS/IPS and impact network stability.
 - If `docker compose build` fails with Docker socket errors, start Docker daemon/Desktop first.
