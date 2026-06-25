@@ -1,0 +1,13 @@
+services:
+  scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: network-scan-cli:latest
+    container_name: network-scan-cli
+    volumes:
+      - ./scanner/inputs:/app/scanner/inputs
+      - ./scanner/config:/app/scanner/config
+      - ./scanner/output:/app/scanner/output
+      - ./scanner/state:/app/scanner/state
+    command: ["--config", "scanner/config/default.yaml", "--mode", "balanced"]

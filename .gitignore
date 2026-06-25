@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+scanner/output/*
+!scanner/output/.gitkeep
+scanner/state/*
+!scanner/state/.gitkeep
+.DS_Store

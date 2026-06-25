@@ -1,0 +1,49 @@
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    jq \
+    nmap \
+    masscan \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    case "${ARCH}" in \
+      amd64) GOARCH="amd64" ;; \
+      arm64) GOARCH="arm64" ;; \
+      *) echo "Unsupported architecture: ${ARCH}"; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/projectdiscovery/dnsx/releases/latest/download/dnsx_linux_${GOARCH}.zip" -o /tmp/dnsx.zip; \
+    curl -fsSL "https://github.com/projectdiscovery/naabu/releases/latest/download/naabu_linux_${GOARCH}.zip" -o /tmp/naabu.zip; \
+    apt-get update && apt-get install -y --no-install-recommends unzip; \
+    unzip -q /tmp/dnsx.zip -d /usr/local/bin; \
+    unzip -q /tmp/naabu.zip -d /usr/local/bin; \
+    chmod +x /usr/local/bin/dnsx /usr/local/bin/naabu; \
+    rm -f /tmp/dnsx.zip /tmp/naabu.zip; \
+    apt-get purge -y unzip && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY scanner /app/scanner
+
+RUN useradd --create-home --shell /usr/sbin/nologin scanner && \
+    mkdir -p /app/scanner/output /app/scanner/state && \
+    chown -R scanner:scanner /app
+
+USER scanner
+
+VOLUME ["/app/scanner/inputs", "/app/scanner/output", "/app/scanner/state", "/app/scanner/config"]
+
+ENTRYPOINT ["python", "-m", "scanner.main"]
+CMD ["--config", "scanner/config/default.yaml"]
