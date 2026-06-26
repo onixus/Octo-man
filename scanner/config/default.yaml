@@ -9,6 +9,9 @@ runtime:
   nse_timeout_seconds: 900
   # Default number of nmap processes run in parallel during the NSE/OS stage.
   nse_concurrency: 4
+  # Global packets/sec budget for the NSE/OS stage, shared across all parallel
+  # nmap processes (each gets nse_max_rate / nse_concurrency). 0 = unlimited.
+  nse_max_rate: 0
   keep_intermediate: true
 
 profiles:
@@ -19,6 +22,7 @@ profiles:
     nmap_timing: T3
     nse_profile: baseline
     nse_concurrency: 2
+    nse_max_rate: 500
   balanced:
     discover_rate: 3000
     port_rate: 3000
@@ -26,6 +30,7 @@ profiles:
     nmap_timing: T4
     nse_profile: vuln
     nse_concurrency: 4
+    nse_max_rate: 2000
   fast:
     discover_rate: 7000
     port_rate: 7000
@@ -33,6 +38,7 @@ profiles:
     nmap_timing: T4
     nse_profile: vuln
     nse_concurrency: 8
+    nse_max_rate: 5000
 
 discovery:
   source: naabu

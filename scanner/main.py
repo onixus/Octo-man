@@ -98,6 +98,7 @@ def main() -> int:
         nse_profile = config.get("nse_profiles", {}).get(nse_profile_name, {})
         nse_timeout = int(runtime.get("nse_timeout_seconds", timeout))
         nse_concurrency = int(profile.get("nse_concurrency", runtime.get("nse_concurrency", 4)))
+        nse_max_rate = int(profile.get("nse_max_rate", runtime.get("nse_max_rate", 0)))
         nmap_dir = run_nse(
             open_ports,
             output_dir=output_dir,
@@ -108,6 +109,7 @@ def main() -> int:
             timeout=nse_timeout,
             retries=retries,
             concurrency=nse_concurrency,
+            max_rate=nse_max_rate,
         )
         checkpoint.mark_done("nse")
 
