@@ -2,9 +2,6 @@
 # Targets a single container, scans port 80, runs default NSE scripts + -sV.
 runtime:
   mode: safe
-  output_dir: scanner/output
-  state_dir: scanner/state
-  logs_dir: scanner/output/logs
   retries: 1
   timeout_seconds: 300
   nse_timeout_seconds: 180
@@ -14,6 +11,20 @@ runtime:
 
 profiles:
   safe:
+    discover_rate: 1000
+    port_rate: 1000
+    top_ports: 100
+    nmap_timing: T4
+    nse_profile: e2e
+    nse_concurrency: 2
+  balanced:
+    discover_rate: 1000
+    port_rate: 1000
+    top_ports: 100
+    nmap_timing: T4
+    nse_profile: e2e
+    nse_concurrency: 2
+  fast:
     discover_rate: 1000
     port_rate: 1000
     top_ports: 100
