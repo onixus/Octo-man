@@ -62,6 +62,10 @@ def build_reports(
 
     if json_export:
         save_json(output_dir / "findings.json", findings)
+        (output_dir / "findings.jsonl").write_text(
+            "".join(json.dumps(item, ensure_ascii=True) + "\n" for item in findings),
+            encoding="utf-8",
+        )
 
     if csv_export:
         csv_path = output_dir / "findings.csv"
@@ -93,8 +97,3 @@ def build_reports(
             + "</pre></body></html>"
         )
         (output_dir / "summary.html").write_text(html, encoding="utf-8")
-
-    (output_dir / "findings.jsonl").write_text(
-        "".join(json.dumps(item, ensure_ascii=True) + "\n" for item in findings),
-        encoding="utf-8",
-    )
