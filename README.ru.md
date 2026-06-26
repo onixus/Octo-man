@@ -74,7 +74,9 @@ YAML проверяется при старте через **Pydantic** (`scanne
 ## Логирование и лимиты
 
 - Ротация логов: `pipeline.log` с `log_max_bytes` / `log_backup_count` в `runtime:`.
-- `docker-compose.yml`: `mem_limit: 4g`, `cpus: "4.0"`, ulimits `nproc`/`nofile`.
+- `docker-compose.yml`: `mem_limit: 8g`, `cpus: "8.0"`, ulimits `nproc`/`nofile` — под
+  агрессивный скан (`--mode fast`: 8× nmap + 4× naabu). Для `safe`/`balanced` на слабом
+  хосте уменьшите лимиты.
 
 ## Рекомендации по профилям и rate-limit
 
