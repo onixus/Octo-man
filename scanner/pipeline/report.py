@@ -72,7 +72,7 @@ def _parse_nmap_xml(nmap_dir: Path) -> tuple[list[dict], list[dict], list[dict]]
     os_matches: list[dict] = []
     script_findings: list[dict] = []
 
-    for xml_file in sorted(nmap_dir.glob("*.xml")):
+    for xml_file in sorted(nmap_dir.rglob("*.xml")):
         try:
             root = ET.fromstring(xml_file.read_text(encoding="utf-8"))
         except ET.ParseError:

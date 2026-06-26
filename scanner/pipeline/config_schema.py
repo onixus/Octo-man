@@ -53,7 +53,11 @@ class DiscoveryConfig(BaseModel):
 
 class PortsConfig(BaseModel):
     source: Literal["naabu"] = "naabu"
+    protocol: Literal["tcp", "udp", "tcp_udp"] = "tcp"
     custom_ports_file: str = "scanner/inputs/ports.txt"
+    custom_udp_ports_file: str = "scanner/inputs/ports_udp.txt"
+    top_udp_ports: int = Field(default=100, ge=1, le=65535)
+    udp_probes: bool = True
 
 
 class NseProfileConfig(BaseModel):

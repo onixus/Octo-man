@@ -23,7 +23,7 @@ docker compose build
 Заполните:
 - `scanner/inputs/ranges.txt`
 - `scanner/inputs/domains.txt`
-- при необходимости `scanner/inputs/ports.txt`
+- при необходимости `scanner/inputs/ports.txt` и `scanner/inputs/ports_udp.txt`
 
 ### 3) Запуск
 
@@ -125,6 +125,25 @@ YAML проверяется при старте через **Pydantic** (`scanne
 Настройка/отключение — секция `batching:` в `scanner/config/default.yaml`
 (`enabled`, `ipv4_prefix`, `max_targets_per_batch`). Меньший `ipv4_prefix` — более
 дробный resume ценой большего числа запусков инструментов.
+
+## Протокол сканирования (TCP / UDP / TCP+UDP)
+
+Секция `ports:` в конфиге:
+
+```yaml
+ports:
+  protocol: tcp        # tcp | udp | tcp_udp
+  top_udp_ports: 100
+  udp_probes: true     # naabu -uP
+  custom_ports_file: scanner/inputs/ports.txt
+  custom_udp_ports_file: scanner/inputs/ports_udp.txt
+```
+
+- **`tcp`** (по умолчанию) — naabu top/custom TCP → nmap `-sV` (+ `-O` при включении).
+- **`udp`** — naabu `-p u:…` с `-uP` → nmap `-sU -sV` (OS detection для UDP отключён).
+- **`tcp_udp`** — оба прохода; в `open_ports.txt` записи `host:port/tcp` и `host:port/udp`.
+
+Checkpoint NSE: ключи `host/tcp` и `host/udp`. XML — в `nmap/tcp/` и `nmap/udp/`.
 
 ## Параллелизм и таймауты NSE
 

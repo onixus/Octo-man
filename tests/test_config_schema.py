@@ -85,6 +85,13 @@ def test_load_config_rejects_invalid_batch_concurrency():
         load_config(raw)
 
 
+def test_load_config_rejects_invalid_port_protocol():
+    raw = _minimal_config()
+    raw["ports"] = {"protocol": "both"}
+    with pytest.raises(ValidationError):
+        load_config(raw)
+
+
 def test_default_yaml_parses():
     import yaml
 
@@ -95,3 +102,5 @@ def test_default_yaml_parses():
     assert cfg.runtime.discover_concurrency == 4
     assert cfg.runtime.ports_concurrency == 4
     assert cfg.runtime.nse_hosts_per_scan == 8
+    assert cfg.ports.protocol == "tcp"
+    assert cfg.ports.udp_probes is True
