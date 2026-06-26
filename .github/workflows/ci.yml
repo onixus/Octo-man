@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff==0.15.20
+      - name: Ruff check
+        run: ruff check scanner tests
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Compile sources
+        run: python -m compileall scanner tests
+      - name: Run tests
+        run: python -m pytest -q
+
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: network-scan-cli:ci
+      - name: Smoke-check toolchain in image
+        run: |
+          docker run --rm --entrypoint sh network-scan-cli:ci -c '
+            set -e
+            naabu -version
+            dnsx -version
+            nmap --version | head -n 1
+            test -f /usr/share/nmap/scripts/nmap-vulners/vulners.nse
+            test -f /usr/share/nmap/scripts/vulscan/vulscan.nse
+            python -m compileall scanner
+          '
