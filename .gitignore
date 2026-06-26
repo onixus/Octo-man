@@ -6,4 +6,6 @@ scanner/output/*
 !scanner/output/.gitkeep
 scanner/state/*
 !scanner/state/.gitkeep
+scanner/inputs/bench/ranges.txt
+scanner/inputs/bench/.bench-net
 .DS_Store
