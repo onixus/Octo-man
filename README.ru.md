@@ -156,11 +156,23 @@ YAML проверяется при старте через **Pydantic** (`scanne
 ./scripts/smoke.sh
 ```
 
-- Быстрый нагрузочный прогон:
+- Быстрый нагрузочный прогон по **вашей сети** (вне CI):
 
 ```bash
 ./scripts/load-test.sh 10.0.0.0/16
 ```
+
+- **Синтетический load test** в docker (как в CI) — N контейнеров-мишеней, без интернета:
+
+```bash
+docker build -t network-scan-cli:ci .
+tests/load/run.sh network-scan-cli:ci --hosts 16
+tests/load/run.sh network-scan-cli:ci --hosts 64 --config tests/load/config-heavy.yaml \
+  --run-id local-heavy --resume-test
+```
+
+В CI на каждый PR — 16 мишеней (`tests/load/config.yaml`). Тяжёлый прогон (64+ хостов,
+checkpoint resume) — workflow `.github/workflows/load-test.yml` (вручную или по cron раз в неделю).
 
 - Модульные тесты чистых функций и парсеров (валидация входа, группировка портов,
   разбор `host:port` с IPv6, деление rate-budget, сборка команды nmap, извлечение
@@ -176,7 +188,8 @@ ruff check scanner tests
 
 - CI (`.github/workflows/ci.yml`) на каждый push в `master` и PR гоняет `ruff`, `pytest`
   (Python 3.11/3.12) и job `image`: сборка, smoke-проверка инструментов, **end-to-end скан**
-  против тестового контейнера, **сканирование образа Trivy** и генерация **SBOM**.
+  против тестового контейнера, **синтетический load test** (16 мишеней), **сканирование образа Trivy**
+  и генерация **SBOM**.
 - E2E (`tests/e2e/run.sh`): поднимает целевой контейнер (`nginx:alpine`) в приватной docker-сети,
   запускает сканер с минимальным офлайн-конфигом и проверяет, что хост жив, порт `80` открыт,
   сервис определён и отчёты сформированы.
