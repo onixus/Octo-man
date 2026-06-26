@@ -185,23 +185,36 @@ _checkpoint_path() {
 _wait_for_checkpoint_progress() {
   local ckpt="$1"
   local timeout_sec="${2:-180}"
+  local want="${3:-any}"
   local elapsed=0
   while [[ "${elapsed}" -lt "${timeout_sec}" ]]; do
     if [[ -f "${ckpt}" ]]; then
-      if python3 - "${ckpt}" <<'PY'
-import json, sys
+      if CKPT_WANT="${want}" python3 - "${ckpt}" <<'PY'
+import json, os, sys
 from pathlib import Path
+
+want = os.environ.get("CKPT_WANT", "any")
 data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 items = data.get("items", {})
-if items.get("discover") or items.get("ports") or items.get("nse"):
+stages = data.get("stages", {})
+
+def has(stage: str) -> bool:
+    return bool(items.get(stage)) or bool(stages.get(stage))
+
+if want == "ports" and has("ports"):
     raise SystemExit(0)
-if data.get("stages", {}).get("discover"):
+if want == "nse" and has("nse"):
+    raise SystemExit(0)
+if want == "any" and (has("discover") or has("ports") or has("nse")):
     raise SystemExit(0)
 raise SystemExit(1)
 PY
       then
         return 0
       fi
+    fi
+    if (( elapsed > 0 && elapsed % 30 == 0 )); then
+      echo "[load] still waiting for checkpoint (${want}, ${elapsed}s) at ${ckpt}"
     fi
     sleep 2
     elapsed=$((elapsed + 2))
@@ -225,11 +238,13 @@ if [[ "${RESUME_TEST}" -eq 1 ]]; then
 
   mon_pid="$(_start_peak_monitor)"
   ckpt="$(_checkpoint_path)"
-  if ! _wait_for_checkpoint_progress "${ckpt}" 180; then
-    echo "[load] timed out waiting for checkpoint progress at ${ckpt}" >&2
+  # Interrupt after port-scan progress (meaningful resume point, faster with skip_discovery).
+  if ! _wait_for_checkpoint_progress "${ckpt}" 300 ports; then
+    echo "[load] timed out waiting for ports checkpoint progress at ${ckpt}" >&2
+    docker logs "${SCANNER_NAME}" 2>&1 | tail -50 || true
     exit 1
   fi
-  echo "[load] checkpoint progress detected; stopping scanner for resume"
+  echo "[load] ports checkpoint progress detected; stopping scanner for resume"
   docker stop -t 10 "${SCANNER_NAME}" >/dev/null 2>&1 || true
   docker rm -f "${SCANNER_NAME}" >/dev/null 2>&1 || true
   peak1="$(_stop_peak_monitor "${mon_pid}")"
