@@ -9,6 +9,14 @@ services:
     cap_add:
       - NET_RAW
       - NET_ADMIN
+    # Prevent a large /16 NSE fan-out from exhausting the host.
+    mem_limit: 4g
+    cpus: "4.0"
+    ulimits:
+      nproc: 512
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
       - ./scanner/inputs:/app/scanner/inputs
       - ./scanner/config:/app/scanner/config
