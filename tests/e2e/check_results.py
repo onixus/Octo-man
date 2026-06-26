@@ -33,7 +33,7 @@ def main() -> int:
 
     if summary.get("alive_hosts", 0) < 1:
         failures.append(f"expected >=1 alive host, got {summary.get('alive_hosts')}")
-    if f"{target_ip}:80" not in open_ports:
+    if f"{target_ip}:80" not in open_ports and f"{target_ip}:80/tcp" not in open_ports:
         failures.append(f"expected {target_ip}:80 in open ports, got {open_ports}")
     if summary.get("nmap_open_services", 0) < 1:
         failures.append(f"expected >=1 nmap service, got {summary.get('nmap_open_services')}")

@@ -52,13 +52,18 @@ def main() -> int:
     if alive_hosts < min_alive:
         failures.append(f"expected >={min_alive} alive hosts, got {alive_hosts}")
 
-    expected_ports = {f"{ip}:80" for ip in targets}
-    found_ports = expected_ports & open_ports
+    found_hosts = sum(
+        1
+        for ip in targets
+        if f"{ip}:80" in open_ports or f"{ip}:80/tcp" in open_ports
+    )
     min_ports = max(1, int(len(targets) * args.min_fraction + 0.999))
-    if len(found_ports) < min_ports:
-        missing = sorted(expected_ports - open_ports)[:5]
+    if found_hosts < min_ports:
+        missing = sorted(
+            ip for ip in targets if f"{ip}:80" not in open_ports and f"{ip}:80/tcp" not in open_ports
+        )[:5]
         failures.append(
-            f"expected >={min_ports} hosts with :80 open, got {len(found_ports)} "
+            f"expected >={min_ports} hosts with :80 open, got {found_hosts} "
             f"(sample missing: {missing})"
         )
 
@@ -73,14 +78,14 @@ def main() -> int:
 
     if failures:
         print("LOAD TEST FAILED:\n  " + "\n  ".join(failures), file=sys.stderr)
-        _report(failures, args.metrics_out, targets, output_dir, summary=summary, open_port_count=len(found_ports))
+        _report(failures, args.metrics_out, targets, output_dir, summary=summary, open_port_count=found_hosts)
         return 1
 
     print(
         f"LOAD TEST OK: targets={len(targets)} alive={alive_hosts} "
-        f"open_ports={len(found_ports)} nmap_services={summary.get('nmap_open_services')}"
+        f"open_ports={found_hosts} nmap_services={summary.get('nmap_open_services')}"
     )
-    _report([], args.metrics_out, targets, output_dir, summary=summary, open_port_count=len(found_ports))
+    _report([], args.metrics_out, targets, output_dir, summary=summary, open_port_count=found_hosts)
     return 0
 
 

@@ -1,64 +1,47 @@
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import logging
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from .protocol import (
+    ScanProtocol,
+    endpoint_checkpoint_key,
+    format_endpoint,
+    parse_endpoint,
+)
 from .utils import run_command, write_lines
 
 
-def _parse_host_port(entry: str) -> tuple[str, str] | None:
-    """Split a naabu ``host:port`` entry, handling bracketed IPv6 (``[::1]:80``)."""
-    entry = entry.strip()
-    if not entry:
-        return None
-    if entry.startswith("[") and "]" in entry:
-        host, _, rest = entry.partition("]")
-        host = host[1:]
-        port = rest.lstrip(":")
-        if host and port.isdigit():
-            return host, port
-        return None
-    host, sep, port = entry.rpartition(":")
-    if not sep or not host or not port.isdigit():
-        return None
-    return host, port
-
-
-def _safe_filename(host: str) -> str:
-    return host.replace(":", "_").replace("/", "_")
-
-
 def _format_nmap_host(host: str) -> str:
-    """Format a host for nmap CLI (bracket IPv6 literals)."""
-    try:
-        if ipaddress.ip_address(host).version == 6:
-            return f"[{host}]"
-    except ValueError:
-        pass
+    from .protocol import is_ipv6
+
+    if is_ipv6(host):
+        return f"[{host}]"
     return host
 
 
+def _safe_filename(value: str) -> str:
+    return value.replace(":", "_").replace("/", "_")
+
+
 def _per_process_rate(max_rate: int, workers: int) -> int:
-    """Split a global packets/sec budget across concurrent nmap processes."""
     if max_rate <= 0:
         return 0
     return max(1, max_rate // max(1, workers))
 
 
-def _group_output_basename(hosts: list[str]) -> str:
+def _group_output_basename(hosts: list[str], protocol: ScanProtocol) -> str:
     if len(hosts) == 1:
-        return _safe_filename(hosts[0])
+        return f"{protocol}_{_safe_filename(hosts[0])}"
     digest = hashlib.sha1(",".join(sorted(hosts)).encode("utf-8")).hexdigest()[:12]
-    return f"group_{digest}"
+    return f"{protocol}_group_{digest}"
 
 
 def _chunk_host_ports(host_ports: dict[str, list[str]], hosts_per_scan: int) -> list[dict[str, list[str]]]:
-    """Split host->ports map into scan groups of up to ``hosts_per_scan`` hosts."""
     size = max(1, hosts_per_scan)
     items = sorted(host_ports.items())
     if size == 1:
@@ -74,11 +57,14 @@ def _build_nmap_command(
     os_detection: bool,
     nmap_timing: str,
     per_process_rate: int,
+    scan_protocol: ScanProtocol,
 ) -> list[str]:
     command = ["nmap", "-n", f"-{nmap_timing}"]
+    if scan_protocol == "udp":
+        command.append("-sU")
     if version_detection:
         command.append("-sV")
-    if os_detection:
+    if os_detection and scan_protocol == "tcp":
         command += ["-O", "--osscan-guess"]
     if per_process_rate > 0:
         command += ["--max-rate", str(per_process_rate)]
@@ -89,14 +75,13 @@ def _build_nmap_command(
     return command
 
 
-def _group_ports_by_host(host_port_list: list[str]) -> dict[str, list[str]]:
+def _group_ports_by_host(entries: list[str], protocol: ScanProtocol) -> dict[str, list[str]]:
     grouped: dict[str, list[str]] = defaultdict(list)
-    for entry in host_port_list:
-        parsed = _parse_host_port(entry)
-        if parsed is None:
+    for entry in entries:
+        parsed = parse_endpoint(entry)
+        if parsed is None or parsed.protocol != protocol:
             continue
-        host, port = parsed
-        grouped[host].append(port)
+        grouped[parsed.host].append(parsed.port)
     return {host: sorted(set(ports), key=int) for host, ports in grouped.items()}
 
 
@@ -110,9 +95,10 @@ def _scan_host_group(
     per_process_rate: int,
     timeout: int,
     retries: int,
+    scan_protocol: ScanProtocol,
 ) -> list[str]:
     hosts = sorted(host_ports)
-    base = nmap_output_dir / _group_output_basename(hosts)
+    base = nmap_output_dir / _group_output_basename(hosts, scan_protocol)
     command = _build_nmap_command(
         host_ports,
         base,
@@ -121,9 +107,95 @@ def _scan_host_group(
         os_detection,
         nmap_timing,
         per_process_rate,
+        scan_protocol,
     )
     run_command(command, timeout=timeout, retries=retries, check=False, capture_output=False)
     return hosts
+
+
+def _run_nse_for_protocol(
+    entries: list[str],
+    *,
+    output_dir: Path,
+    scripts: str,
+    version_detection: bool,
+    os_detection: bool,
+    nmap_timing: str,
+    timeout: int,
+    retries: int,
+    concurrency: int,
+    max_rate: int,
+    hosts_per_scan: int,
+    scan_protocol: ScanProtocol,
+    done_keys: set[str],
+    on_host_done: Callable[[str], None] | None,
+) -> None:
+    grouped = _group_ports_by_host(entries, scan_protocol)
+    if not grouped:
+        return
+
+    pending = {
+        host: ports
+        for host, ports in grouped.items()
+        if endpoint_checkpoint_key(host, scan_protocol) not in done_keys
+    }
+    skipped = len(grouped) - len(pending)
+    if skipped:
+        logging.info("Resuming NSE (%s): skipping %s already-scanned hosts", scan_protocol, skipped)
+    if not pending:
+        return
+
+    nmap_output_dir = output_dir / "nmap" / scan_protocol
+    nmap_output_dir.mkdir(parents=True, exist_ok=True)
+
+    scan_groups = _chunk_host_ports(pending, hosts_per_scan)
+    workers = max(1, concurrency)
+    per_process_rate = _per_process_rate(max_rate, workers)
+    logging.info(
+        "Running %s NSE scans for %s hosts in %s group(s) "
+        "(hosts_per_scan=%s, concurrency=%s, per_process_rate=%s pps)",
+        scan_protocol.upper(),
+        len(pending),
+        len(scan_groups),
+        max(1, hosts_per_scan),
+        workers,
+        per_process_rate if per_process_rate > 0 else "unlimited",
+    )
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(
+                _scan_host_group,
+                group,
+                nmap_output_dir,
+                scripts,
+                version_detection,
+                os_detection,
+                nmap_timing,
+                per_process_rate,
+                timeout,
+                retries,
+                scan_protocol,
+            ): group
+            for group in scan_groups
+        }
+        for future in as_completed(futures):
+            group = futures[future]
+            try:
+                completed_hosts = future.result()
+            except Exception as exc:  # noqa: BLE001
+                label = ",".join(sorted(group))
+                logging.warning(
+                    "NSE (%s) scan failed for group (%s hosts): %s",
+                    scan_protocol,
+                    len(group),
+                    label[:120],
+                )
+                logging.debug("NSE group failure detail: %s", exc)
+                continue
+            if on_host_done is not None:
+                for host in completed_hosts:
+                    on_host_done(endpoint_checkpoint_key(host, scan_protocol))
 
 
 def run_nse(
@@ -141,64 +213,44 @@ def run_nse(
     done_hosts: Iterable[str] | None = None,
     on_host_done: Callable[[str], None] | None = None,
 ) -> Path:
-    grouped = _group_ports_by_host(host_port_list)
+    normalized: list[str] = []
+    for entry in host_port_list:
+        parsed = parse_endpoint(entry)
+        if parsed is None:
+            continue
+        normalized.append(format_endpoint(parsed.host, parsed.port, parsed.protocol))
+
     targets_file = output_dir / "nse_targets.txt"
-    lines = [f"{host} {','.join(ports)}" for host, ports in grouped.items()]
-    write_lines(targets_file, lines)
+    write_lines(targets_file, normalized)
 
-    nmap_output_dir = output_dir / "nmap"
-    nmap_output_dir.mkdir(parents=True, exist_ok=True)
-    if not grouped:
-        return nmap_output_dir
+    nmap_root = output_dir / "nmap"
+    nmap_root.mkdir(parents=True, exist_ok=True)
+    if not normalized:
+        return nmap_root
 
-    already_done = set(done_hosts or ())
-    pending = {host: ports for host, ports in grouped.items() if host not in already_done}
-    skipped = len(grouped) - len(pending)
-    if skipped:
-        logging.info("Resuming NSE: skipping %s already-scanned hosts", skipped)
-    if not pending:
-        return nmap_output_dir
+    done_keys = set(done_hosts or ())
+    for key in list(done_keys):
+        if "/" not in key:
+            done_keys.add(endpoint_checkpoint_key(key, "tcp"))
+    tcp_entries = [entry for entry in normalized if entry.endswith("/tcp")]
+    udp_entries = [entry for entry in normalized if entry.endswith("/udp")]
 
-    scan_groups = _chunk_host_ports(pending, hosts_per_scan)
-    workers = max(1, concurrency)
-    per_process_rate = _per_process_rate(max_rate, workers)
-    logging.info(
-        "Running NSE/OS scans for %s hosts in %s group(s) "
-        "(hosts_per_scan=%s, concurrency=%s, global_max_rate=%s pps, per_process_rate=%s pps)",
-        len(pending),
-        len(scan_groups),
-        max(1, hosts_per_scan),
-        workers,
-        max_rate if max_rate > 0 else "unlimited",
-        per_process_rate if per_process_rate > 0 else "unlimited",
-    )
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(
-                _scan_host_group,
-                group,
-                nmap_output_dir,
-                scripts,
-                version_detection,
-                os_detection,
-                nmap_timing,
-                per_process_rate,
-                timeout,
-                retries,
-            ): group
-            for group in scan_groups
-        }
-        for future in as_completed(futures):
-            group = futures[future]
-            try:
-                completed_hosts = future.result()
-            except Exception as exc:  # noqa: BLE001
-                label = ",".join(sorted(group))
-                logging.warning("NSE scan failed for group (%s hosts): %s", len(group), label[:120])
-                logging.debug("NSE group failure detail: %s", exc)
-                continue
-            if on_host_done is not None:
-                for host in completed_hosts:
-                    on_host_done(host)
+    for scan_protocol, entries in (("tcp", tcp_entries), ("udp", udp_entries)):
+        _run_nse_for_protocol(
+            entries,
+            output_dir=output_dir,
+            scripts=scripts,
+            version_detection=version_detection,
+            os_detection=os_detection,
+            nmap_timing=nmap_timing,
+            timeout=timeout,
+            retries=retries,
+            concurrency=concurrency,
+            max_rate=max_rate,
+            hosts_per_scan=hosts_per_scan,
+            scan_protocol=scan_protocol,
+            done_keys=done_keys,
+            on_host_done=on_host_done,
+        )
 
-    return nmap_output_dir
+    return nmap_root

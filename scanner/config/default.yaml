@@ -67,7 +67,12 @@ discovery:
 
 ports:
   source: naabu
+  # Scan protocol: tcp | udp | tcp_udp
+  protocol: tcp
   custom_ports_file: scanner/inputs/ports.txt
+  custom_udp_ports_file: scanner/inputs/ports_udp.txt
+  top_udp_ports: 100
+  udp_probes: true
 
 nse_profiles:
   baseline:

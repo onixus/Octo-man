@@ -15,7 +15,7 @@ Reproducible CLI pipeline for scanning large networks:
 - Input contract with validation and normalization.
 - Speed profiles: `safe`, `balanced`, `fast`.
 - DNS resolve for FQDN via `dnsx`.
-- Host discovery and fast TCP port scan via `naabu`.
+- Host discovery and fast port scan via `naabu` (TCP, UDP, or both).
 - Enrichment with Nmap `-sV`, OS detection (`-O`) and NSE profiles (incl. `vuln`).
 - Parallel NSE/OS stage (configurable `nse_concurrency`) for faster large scans.
 - Parallel discovery/port batches (`discover_concurrency`, `ports_concurrency`) for faster naabu stages.
@@ -50,8 +50,13 @@ One FQDN per line:
 
 ### `scanner/inputs/ports.txt` (optional)
 
-Custom port selectors (one per line).  
-If empty, `top-ports` from selected profile are used.
+Custom **TCP** port selectors (one per line).  
+If empty, `top-ports` from the selected profile are used.
+
+### `scanner/inputs/ports_udp.txt` (optional)
+
+Custom **UDP** ports for `ports.protocol: udp` or `tcp_udp`.  
+If empty, a built-in top-UDP list (`ports.top_udp_ports`, default 100) is used.
 
 Examples:
 - `22`
@@ -295,6 +300,25 @@ Findings are parsed into structured results: each `CVE` gets a `cvss` score and 
 Scripts reporting `State: VULNERABLE` without a CVE are also captured (severity `unknown`).
 
 Tune profile parameters in `scanner/config/default.yaml`.
+
+### Scan protocol (TCP / UDP / TCP+UDP)
+
+Under `ports:` in the config:
+
+```yaml
+ports:
+  protocol: tcp        # tcp | udp | tcp_udp
+  top_udp_ports: 100   # when no custom UDP list
+  udp_probes: true     # naabu -uP (protocol payloads for UDP)
+  custom_ports_file: scanner/inputs/ports.txt
+  custom_udp_ports_file: scanner/inputs/ports_udp.txt
+```
+
+- **`tcp`** (default): naabu `-top-ports` / custom TCP list → nmap `-sV` (+ optional `-O`).
+- **`udp`**: naabu `-p u:53,u:123,...` with optional `-uP` → nmap `-sU -sV` (OS detection disabled for UDP).
+- **`tcp_udp`**: both passes; results in `open_ports.txt` as `host:port/tcp` and `host:port/udp`.
+
+NSE checkpoint keys use `host/tcp` and `host/udp`. Nmap XML lives under `nmap/tcp/` and `nmap/udp/`.
 
 ### NSE / OS detection
 

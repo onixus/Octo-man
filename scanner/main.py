@@ -67,7 +67,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         max_bytes=config.runtime.log_max_bytes,
         backup_count=config.runtime.log_backup_count,
     )
-    logging.info("Starting scan pipeline in '%s' mode (run_id=%s)", profile_name, paths.run_id)
+    logging.info("Starting scan pipeline in '%s' mode (run_id=%s, ports=%s)", profile_name, paths.run_id, config.ports.protocol)
     if not args.resume:
         write_run_meta(paths, profile_name, args.config)
 
@@ -142,6 +142,8 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     else:
         open_set: set[str] = set(read_lines(open_file)) if args.resume else set()
         custom_ports_file = Path(config.ports.custom_ports_file)
+        custom_udp_ports_file = Path(config.ports.custom_udp_ports_file)
+        port_cfg = config.ports
         batches = make_batches(alive_hosts)
         run_batches_parallel(
             stage="ports",
@@ -153,9 +155,13 @@ def _run_pipeline(args: argparse.Namespace) -> int:
                 output_dir=paths.output_dir,
                 rate=profile.port_rate,
                 top_ports=profile.top_ports,
+                top_udp_ports=port_cfg.top_udp_ports,
                 timeout=timeout,
                 retries=retries,
+                protocol_mode=port_cfg.protocol,
                 custom_ports_file=custom_ports_file,
+                custom_udp_ports_file=custom_udp_ports_file,
+                udp_probes=port_cfg.udp_probes,
                 tag=bid,
             ),
             aggregate=open_set,
