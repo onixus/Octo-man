@@ -15,7 +15,8 @@ WORK="$(mktemp -d)"
 cleanup() {
   docker rm -f "${TARGET}" >/dev/null 2>&1 || true
   docker network rm "${NET}" >/dev/null 2>&1 || true
-  rm -rf "${WORK}"
+  # Output files are owned by the container's non-root uid; fall back to sudo.
+  rm -rf "${WORK}" 2>/dev/null || sudo rm -rf "${WORK}" 2>/dev/null || true
 }
 trap cleanup EXIT
 
