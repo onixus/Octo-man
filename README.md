@@ -14,10 +14,11 @@ Reproducible CLI pipeline for scanning large networks:
 - Speed profiles: `safe`, `balanced`, `fast`.
 - DNS resolve for FQDN via `dnsx`.
 - Host discovery and fast TCP port scan via `naabu`.
-- Enrichment with Nmap `-sV` and NSE profiles.
-- Retry + timeout handling per external command.
+- Enrichment with Nmap `-sV`, OS detection (`-O`) and NSE profiles (incl. `vuln`).
+- Parallel NSE/OS stage (configurable `nse_concurrency`) for faster large scans.
+- Retry + timeout handling per external command (with a separate per-host `nse_timeout_seconds`).
 - Checkpoint/resume support.
-- Report exports with summary and parsed Nmap service data.
+- Report exports with summary, parsed Nmap service data, OS matches and vulnerability findings.
 
 ## Project Layout
 
@@ -103,11 +104,21 @@ python -m pytest -q
 
 ## Profiles
 
-- `safe`: lower packet rate, `top-100`, conservative timing.
-- `balanced`: default profile, `top-1000`.
-- `fast`: higher discovery/scan rate, `top-1000`.
+- `safe`: lower packet rate, `top-100`, conservative timing, `baseline` NSE (no `vuln`), `nse_concurrency: 2`.
+- `balanced`: default profile, `top-1000`, `vuln` NSE + OS detection, `nse_concurrency: 4`.
+- `fast`: higher discovery/scan rate, `top-1000`, `vuln` NSE + OS detection, `nse_concurrency: 8`.
 
 Tune profile parameters in `scanner/config/default.yaml`.
+
+### NSE / OS detection
+
+- `nse_profiles.<name>.scripts`: Nmap `--script` selector (e.g. `default,safe,vuln`).
+- `nse_profiles.<name>.os_detection`: enables `nmap -O --osscan-guess`.
+- `runtime.nse_concurrency` / `profiles.<name>.nse_concurrency`: number of nmap processes run in parallel.
+- `runtime.nse_timeout_seconds`: per-host nmap timeout (independent of the global command timeout).
+
+OS detection and SYN/ICMP probing require raw sockets. The container is granted
+`NET_RAW`/`NET_ADMIN` via `docker-compose.yml`; outside compose run with equivalent capabilities.
 
 ## Output Artifacts
 
@@ -120,6 +131,9 @@ Tune profile parameters in `scanner/config/default.yaml`.
 - `scanner/output/nse_targets.txt`
 - `scanner/output/nmap/*` (`.nmap`, `.gnmap`, `.xml`)
 - `scanner/output/findings.{json,jsonl,csv}`
+- `scanner/output/os_findings.json` (parsed Nmap OS matches)
+- `scanner/output/script_findings.json` (all NSE script output)
+- `scanner/output/vulnerabilities.json` (NSE findings flagged `VULNERABLE`)
 - `scanner/output/summary.{json,md,html}`
 - `scanner/output/logs/pipeline.log`
 

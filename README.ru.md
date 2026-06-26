@@ -60,8 +60,16 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
 2. **Resolve**: FQDN -> IP через `dnsx`.
 3. **Discovery**: определение живых хостов.
 4. **Fast ports**: быстрый проход по `top-ports`/custom ports.
-5. **NSE/Nmap**: углубление только для найденных открытых портов.
-6. **Отчеты**: экспорт JSON/CSV + краткая человекочитаемая сводка.
+5. **NSE/Nmap**: углубление только для найденных открытых портов — определение версий сервисов, **версии ОС (`-O`)** и **уязвимостей (NSE-категория `vuln`)**. Этап выполняется параллельно пулом процессов nmap.
+6. **Отчеты**: экспорт JSON/CSV + сводка, включая найденные ОС и потенциальные уязвимости.
+
+## Параллелизм и таймауты NSE
+
+- `runtime.nse_concurrency` / `profiles.<name>.nse_concurrency` — число одновременно запускаемых процессов nmap. Увеличивайте под мощность хоста и допустимый сетевой шум.
+- `runtime.nse_timeout_seconds` — таймаут nmap на один хост (отдельно от глобального `timeout_seconds`).
+- `nse_profiles.<name>.os_detection: true` включает `nmap -O --osscan-guess`. Требует raw-сокетов (`NET_RAW`/`NET_ADMIN`, уже выданы в `docker-compose.yml`).
+
+Артефакты по ОС и уязвимостям: `scanner/output/os_findings.json`, `scanner/output/script_findings.json`, `scanner/output/vulnerabilities.json`.
 
 ## Когда выбирать `safe` / `balanced` / `fast`
 
