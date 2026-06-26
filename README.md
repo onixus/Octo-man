@@ -149,6 +149,20 @@ on smaller hosts.
   - writes a temporary CIDR target;
   - runs `fast` profile in container.
 
+### Local discovery benchmark (emulated network)
+
+`bench/` spins up a private docker lab (`10.99.0.0/22` by default) with nginx targets and
+runs a discovery-tuned config (`scanner/config/discovery-bench.yaml`):
+
+```bash
+chmod +x bench/*.sh
+bench/run-discovery.sh              # 32 alive, /22 CIDR (~1024 addresses)
+bench/run-discovery.sh 64 1000 list   # 1000 IPs, 64 alive containers
+bench/down.sh                       # teardown
+```
+
+Metrics JSON is written under `scanner/output/bench/`. Tune `bench/env.defaults`.
+
 ## Tests
 
 Unit tests cover the pure helpers and parsers: input validation, port grouping,

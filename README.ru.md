@@ -203,6 +203,17 @@ tests/load/run.sh network-scan-cli:ci --hosts 64 --config tests/load/config-heav
 В CI на каждый PR — 16 мишеней (`tests/load/config.yaml`). Тяжёлый прогон (64+ хостов,
 checkpoint resume) — workflow `.github/workflows/load-test.yml` (вручную или по cron раз в неделю).
 
+- **Локальный бенчмарк discovery** (эмуляция сети в docker, каталог `bench/`):
+
+```bash
+chmod +x bench/*.sh
+bench/run-discovery.sh              # 32 живых, CIDR /22 (~1024 адреса)
+bench/run-discovery.sh 64 1000 list # 1000 IP, 64 nginx
+bench/down.sh
+```
+
+Конфиг: `scanner/config/discovery-bench.yaml`, параметры — `bench/env.defaults`.
+
 - Модульные тесты чистых функций и парсеров (валидация входа, группировка портов,
   разбор `host:port` с IPv6, деление rate-budget, сборка команды nmap, извлечение
   сервисов/ОС/CVE с CVSS и severity из отчётов nmap):
