@@ -33,6 +33,20 @@ RUN set -eux; \
     rm -f /tmp/dnsx.zip /tmp/naabu.zip; \
     apt-get purge -y unzip && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
+# Vulnerability NSE scripts:
+#  - nmap-vulners: maps service versions (-sV) to CVEs via the vulners.com API (needs egress).
+#  - vulscan: offline CVE matching against bundled local databases (no internet required).
+# Pin to a commit via build args for reproducible builds; defaults track upstream main.
+ARG NMAP_VULNERS_REF=master
+ARG VULSCAN_REF=master
+RUN set -eux; \
+    git clone https://github.com/vulnersCom/nmap-vulners.git /usr/share/nmap/scripts/nmap-vulners; \
+    git -C /usr/share/nmap/scripts/nmap-vulners checkout "${NMAP_VULNERS_REF}"; \
+    git clone https://github.com/scipag/vulscan.git /usr/share/nmap/scripts/vulscan; \
+    git -C /usr/share/nmap/scripts/vulscan checkout "${VULSCAN_REF}"; \
+    rm -rf /usr/share/nmap/scripts/nmap-vulners/.git /usr/share/nmap/scripts/vulscan/.git; \
+    nmap --script-updatedb
+
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
