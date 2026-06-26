@@ -149,6 +149,32 @@ git tag v0.1.0 && git push origin v0.1.0
 > The GHCR package may be **private** by default; make it public (or authenticate
 > with a token) to pull it from other hosts.
 
+## Reproducible & Pinned Builds
+
+The image is pinned end-to-end so a rebuild is byte-reproducible and protected from
+upstream/MITM tampering:
+
+- **Base image** pinned by multi-arch **index digest** (`python:3.12-slim@sha256:...`).
+- **dnsx / naabu** pinned by version **and** per-arch **sha256** (`*_SHA256_AMD64/ARM64`
+  build args); the downloaded archive is verified with `sha256sum -c` during build.
+- **nmap-vulners / vulscan** pinned to specific **commit SHAs** (`NMAP_VULNERS_REF`,
+  `VULSCAN_REF`).
+
+Upgrading a pin:
+
+```bash
+# base image digest
+docker manifest inspect python:3.12-slim | grep -m1 digest
+# tool sha256 (from the release checksums file)
+curl -fsSL https://github.com/projectdiscovery/dnsx/releases/download/vX.Y.Z/dnsx_X.Y.Z_checksums.txt
+# NSE script commit
+git ls-remote https://github.com/vulnersCom/nmap-vulners.git HEAD
+```
+
+Then update the corresponding `FROM ... @sha256` / `ARG` defaults in the `Dockerfile`
+(or override them via `--build-arg`). Because the digest is frozen, re-pin periodically to
+pick up base-image security updates (see image scanning in the production hardening backlog).
+
 ## Profiles
 
 - `safe`: lower packet rate, `top-100`, conservative timing, `baseline` NSE (no `vuln`), `nse_concurrency: 2`, `nse_max_rate: 500`.
