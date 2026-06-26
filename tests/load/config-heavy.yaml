@@ -2,13 +2,13 @@
 runtime:
   mode: safe
   retries: 1
-  timeout_seconds: 1800
-  nse_timeout_seconds: 180
+  timeout_seconds: 600
+  nse_timeout_seconds: 120
   nse_concurrency: 4
   nse_max_rate: 0
   nse_hosts_per_scan: 8
-  discover_concurrency: 4
-  ports_concurrency: 4
+  discover_concurrency: 1
+  ports_concurrency: 1
   per_run_output: true
 
 profiles:
@@ -37,7 +37,7 @@ profiles:
 batching:
   enabled: true
   ipv4_prefix: 24
-  max_targets_per_batch: 16
+  max_targets_per_batch: 4
 
 discovery:
   source: naabu
@@ -50,7 +50,8 @@ ports:
 
 nse_profiles:
   load:
-    scripts: "default"
+    # Fast offline scripts — default NSE suite is too slow at 32+ hosts on GHA.
+    scripts: "banner"
     version_detection: true
     os_detection: false
 
