@@ -70,7 +70,19 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
 - `runtime.nse_timeout_seconds` — таймаут nmap на один хост (отдельно от глобального `timeout_seconds`).
 - `nse_profiles.<name>.os_detection: true` включает `nmap -O --osscan-guess`. Требует raw-сокетов (`NET_RAW`/`NET_ADMIN`, уже выданы в `docker-compose.yml`).
 
-Артефакты по ОС и уязвимостям: `scanner/output/os_findings.json`, `scanner/output/script_findings.json`, `scanner/output/vulnerabilities.json`.
+Артефакты по ОС и уязвимостям: `scanner/output/os_findings.json`, `scanner/output/script_findings.json`, `scanner/output/vulnerabilities.json`, `scanner/output/vulnerabilities.csv`.
+
+## Проверка уязвимостей
+
+Этап NSE выполняет проверку уязвимостей в зависимости от профиля `nse_profiles`:
+
+- `vuln` — категория Nmap `vuln` **+ `vulners`**: сопоставление версий сервисов (`-sV`) с CVE через API vulners.com. Привязан к `balanced`/`fast`. **Требует исходящего доступа в интернет**.
+- `vuln-offline` — категория `vuln` **+ `vulscan`**: офлайн-сопоставление CVE по локальным базам (интернет не нужен).
+- `baseline` — только неинтрузивные `default,safe` (используется в `safe`).
+
+Скрипты `nmap-vulners` и `vulscan` ставятся в образ на этапе сборки (`Dockerfile`, версии пинуются через build-args `NMAP_VULNERS_REF` / `VULSCAN_REF`).
+
+Находки структурируются: для каждого `CVE` извлекается `cvss` и вычисляется `severity` (`critical >= 9.0`, `high >= 7.0`, `medium >= 4.0`, `low > 0`, иначе `unknown`). Скрипты со `State: VULNERABLE` без CVE тоже фиксируются (severity `unknown`). Список отсортирован по убыванию критичности.
 
 ## Когда выбирать `safe` / `balanced` / `fast`
 

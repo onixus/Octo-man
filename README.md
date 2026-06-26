@@ -108,6 +108,21 @@ python -m pytest -q
 - `balanced`: default profile, `top-1000`, `vuln` NSE + OS detection, `nse_concurrency: 4`.
 - `fast`: higher discovery/scan rate, `top-1000`, `vuln` NSE + OS detection, `nse_concurrency: 8`.
 
+### Vulnerability checking
+
+The NSE stage performs CVE/vulnerability checks driven by `nse_profiles`:
+
+- `vuln`: Nmap `vuln` category **plus** `vulners` — maps detected service versions (`-sV`) to CVEs via the vulners.com API. Wired to `balanced`/`fast`. **Requires outbound internet** for the vulners lookups.
+- `vuln-offline`: Nmap `vuln` category **plus** `vulscan` — offline CVE matching against bundled local databases (no internet). Select with `--mode` after setting it as a profile's `nse_profile`, or edit the profile.
+- `baseline`: non-intrusive `default,safe` only (used by `safe`).
+
+The `nmap-vulners` and `vulscan` scripts are installed into the image at build time
+(see `Dockerfile`; pin via `NMAP_VULNERS_REF` / `VULSCAN_REF` build args).
+
+Findings are parsed into structured results: each `CVE` gets a `cvss` score and a derived
+`severity` (`critical >= 9.0`, `high >= 7.0`, `medium >= 4.0`, `low > 0`, else `unknown`).
+Scripts reporting `State: VULNERABLE` without a CVE are also captured (severity `unknown`).
+
 Tune profile parameters in `scanner/config/default.yaml`.
 
 ### NSE / OS detection
@@ -134,8 +149,9 @@ OS detection and SYN/ICMP probing require raw sockets. The container is granted
 - `scanner/output/findings.{json,jsonl,csv}`
 - `scanner/output/os_findings.json` (parsed Nmap OS matches)
 - `scanner/output/script_findings.json` (all NSE script output)
-- `scanner/output/vulnerabilities.json` (NSE findings flagged `VULNERABLE`)
-- `scanner/output/summary.{json,md,html}`
+- `scanner/output/vulnerabilities.json` (structured CVE findings with `cvss`/`severity`, severity-ranked)
+- `scanner/output/vulnerabilities.csv` (same findings, flat CSV)
+- `scanner/output/summary.{json,md,html}` (includes severity breakdown)
 - `scanner/output/logs/pipeline.log`
 
 ## Notes
