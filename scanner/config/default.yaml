@@ -5,6 +5,10 @@ runtime:
   logs_dir: scanner/output/logs
   retries: 2
   timeout_seconds: 1800
+  # Per-host nmap (NSE/OS) timeout, separate from the global command timeout.
+  nse_timeout_seconds: 900
+  # Default number of nmap processes run in parallel during the NSE/OS stage.
+  nse_concurrency: 4
   keep_intermediate: true
 
 profiles:
@@ -14,18 +18,21 @@ profiles:
     top_ports: 100
     nmap_timing: T3
     nse_profile: baseline
+    nse_concurrency: 2
   balanced:
     discover_rate: 3000
     port_rate: 3000
     top_ports: 1000
     nmap_timing: T4
-    nse_profile: baseline
+    nse_profile: vuln
+    nse_concurrency: 4
   fast:
     discover_rate: 7000
     port_rate: 7000
     top_ports: 1000
     nmap_timing: T4
-    nse_profile: baseline
+    nse_profile: vuln
+    nse_concurrency: 8
 
 discovery:
   source: naabu
@@ -39,9 +46,15 @@ nse_profiles:
   baseline:
     scripts: "default,safe"
     version_detection: true
+    os_detection: true
+  vuln:
+    scripts: "default,safe,vuln"
+    version_detection: true
+    os_detection: true
   service_specific:
     scripts: "http-*,ssl-cert,smb-*,ssh-*,dns-*"
     version_detection: true
+    os_detection: false
 
 reporting:
   markdown_summary: true
