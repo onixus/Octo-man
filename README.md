@@ -113,7 +113,30 @@ ruff check scanner tests
 
 - **lint**: `ruff check`.
 - **test**: `compileall` + `pytest` on Python 3.11 and 3.12.
-- **docker-build**: builds the image and smoke-checks the toolchain (`naabu`, `dnsx`, `nmap`, `nmap-vulners`/`vulscan` scripts).
+- **image**: builds the image, smoke-checks the toolchain, runs an **end-to-end scan**
+  against a throwaway target container, scans the image with **Trivy**, and generates a
+  **SBOM** artifact.
+
+### End-to-end test
+
+`tests/e2e/run.sh` builds nothing itself — given the built image it spins up a target
+container (`nginx:alpine`) on a private docker network, runs the scanner against it with a
+minimal offline config (`tests/e2e/config.yaml`), and asserts (via
+`tests/e2e/check_results.py`) that the host is found alive, port `80` is open, an Nmap
+service is detected, and the report artifacts exist. Run locally:
+
+```bash
+docker build -t network-scan-cli:ci .
+tests/e2e/run.sh network-scan-cli:ci
+```
+
+### Image scanning & SBOM
+
+- **Trivy** scans the built image: a non-blocking report (CRITICAL/HIGH/MEDIUM) plus a gate
+  that fails only on **fixable CRITICAL** vulnerabilities.
+- A **CycloneDX/SPDX SBOM** is generated (Syft) and uploaded as the `sbom` CI artifact.
+- The publish workflow additionally attaches **SBOM + SLSA provenance attestations** to the
+  image pushed to GHCR (`sbom: true`, `provenance: mode=max`).
 
 ## Container Image (GHCR)
 
