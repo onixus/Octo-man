@@ -1,5 +1,5 @@
 runtime:
-  mode: standard
+  mode: balanced
   output_dir: scanner/output
   state_dir: scanner/state
   logs_dir: scanner/output/logs
