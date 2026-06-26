@@ -10,6 +10,7 @@ runtime:
   nse_timeout_seconds: 180
   nse_concurrency: 2
   nse_max_rate: 0
+  per_run_output: false
 
 profiles:
   safe:
