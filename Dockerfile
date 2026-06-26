@@ -56,6 +56,17 @@ RUN set -eux; \
     rm -rf /usr/share/nmap/scripts/nmap-vulners/.git /usr/share/nmap/scripts/vulscan/.git; \
     nmap --script-updatedb
 
+# Grant the raw-socket capability to the scanner binaries via file capabilities so
+# host discovery / SYN scans / OS detection work as the non-root 'scanner' user.
+# (A container-level --cap-add is NOT inherited by a non-root process on its own.)
+# Only cap_net_raw is used: it is in Docker's default bounding set (so the binaries
+# still exec when run without extra --cap-add), and is sufficient for scanning.
+RUN set -eux; \
+    apt-get update && apt-get install -y --no-install-recommends libcap2-bin; \
+    setcap cap_net_raw+eip /usr/local/bin/naabu; \
+    setcap cap_net_raw+eip /usr/bin/nmap; \
+    apt-get purge -y libcap2-bin && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
