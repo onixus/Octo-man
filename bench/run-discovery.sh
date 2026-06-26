@@ -15,7 +15,11 @@ RUN_ID="bench-$(date -u +%Y%m%dT%H%M%SZ)"
 LOG_DIR="${ROOT_DIR}/scanner/output/bench/logs"
 METRICS_FILE="${ROOT_DIR}/scanner/output/bench/${RUN_ID}-metrics.json"
 
-mkdir -p "${LOG_DIR}"
+mkdir -p "${LOG_DIR}" "${ROOT_DIR}/scanner/state/bench"
+# Scanner container runs as uid 1000; sudo bench runs may leave root-owned dirs.
+if [[ -O "${ROOT_DIR}/scanner/output" ]] || [[ "$(id -u)" -eq 0 ]]; then
+  chown -R 1000:1000 "${ROOT_DIR}/scanner/output/bench" "${ROOT_DIR}/scanner/state/bench" 2>/dev/null || true
+fi
 
 echo "[bench] bringing up emulated network"
 "${ROOT_DIR}/bench/up.sh" "${1:-}" "${2:-}" "${3:-}"
@@ -32,10 +36,27 @@ TARGET_LINES="$(wc -l < "${RANGES}" | tr -d ' ')"
 echo "[bench] running discovery benchmark (mode=${BENCH_MODE}, targets=${TARGET_LINES}, run_id=${RUN_ID})"
 START_TS="$(date +%s)"
 
+BENCH_CPUS="${BENCH_CPUS:-$(nproc)}"
+if (( BENCH_CPUS > 8 )); then
+  BENCH_CPUS=8
+fi
+
+DOCKER_LIMITS=()
+if [[ "${BENCH_DOCKER_LIMITS:-0}" == "1" ]]; then
+  DOCKER_LIMITS=(--memory 8g --cpus "${BENCH_CPUS}")
+fi
+
 set +e
-docker compose run --rm --no-TTY \
-  --network "${BENCH_NET_NAME}" \
-  scanner \
+# compose run does not accept --network on all versions; mirror docker-compose.yml via docker run.
+docker run --rm --network "${BENCH_NET_NAME}" \
+  --cap-add NET_RAW --cap-add NET_ADMIN \
+  "${DOCKER_LIMITS[@]}" \
+  --ulimit nproc=1024:1024 --ulimit nofile=65536:65536 \
+  -v "${ROOT_DIR}/scanner/inputs:/app/scanner/inputs" \
+  -v "${ROOT_DIR}/scanner/config:/app/scanner/config" \
+  -v "${ROOT_DIR}/scanner/output:/app/scanner/output" \
+  -v "${ROOT_DIR}/scanner/state:/app/scanner/state" \
+  network-scan-cli:latest \
   --config "${BENCH_CONFIG}" \
   --mode "${BENCH_MODE}" \
   --ranges scanner/inputs/bench/ranges.txt \
