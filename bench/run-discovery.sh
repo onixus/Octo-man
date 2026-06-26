@@ -102,12 +102,12 @@ alive = len(alive_file.read_text(encoding="utf-8").splitlines()) if alive_file.e
 open_ports = len(open_file.read_text(encoding="utf-8").splitlines()) if open_file.exists() else 0
 
 discover_sec = None
-scan_mode = None
+scan_mode = os.environ.get("BENCH_METRICS_MODE") or None
 if pipe_log.exists():
     text = pipe_log.read_text(encoding="utf-8", errors="replace")
-    mode_match = re.search(r"Starting scan pipeline in '(\w+)' mode", text)
-    if mode_match:
-        scan_mode = mode_match.group(1)
+    modes = re.findall(r"Starting scan pipeline in '(\w+)' mode", text)
+    if modes:
+        scan_mode = modes[-1]
     starts = [m.group(1) for m in re.finditer(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ INFO discover:", text, re.M)]
     ends = [m.group(1) for m in re.finditer(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ INFO ports:", text, re.M)]
     if starts and ends:
@@ -121,7 +121,7 @@ payload = {
     "hostname": socket.gethostname(),
     "cpu_count": os.cpu_count(),
     "mem_total_mb": mem_total_mb(),
-    "scan_mode": scan_mode or os.environ.get("BENCH_METRICS_MODE"),
+    "scan_mode": scan_mode,
     "alive_containers": int(os.environ.get("BENCH_METRICS_ALIVE", "0") or 0),
     "duration_sec": duration,
     "exit_code": rc,
