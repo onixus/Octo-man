@@ -113,6 +113,36 @@ ruff check scanner tests
 - **test**: `compileall` + `pytest` on Python 3.11 and 3.12.
 - **docker-build**: builds the image and smoke-checks the toolchain (`naabu`, `dnsx`, `nmap`, `nmap-vulners`/`vulscan` scripts).
 
+## Container Image (GHCR)
+
+`.github/workflows/docker-publish.yml` builds a multi-arch image (`linux/amd64`, `linux/arm64`)
+and pushes it to GitHub Container Registry. It runs when a `v*` tag is pushed, when a GitHub
+release is published, or manually via **workflow_dispatch**.
+
+Published as `ghcr.io/<owner>/<repo>` (name lowercased). Tagging:
+
+- a version tag `vX.Y.Z` produces image tags `X.Y.Z`, `X.Y`, `X`, the commit `sha-<...>` and `latest`;
+- `workflow_dispatch` can publish an extra ad-hoc tag via the `tag` input.
+
+Pull and run:
+
+```bash
+docker pull ghcr.io/<owner>/<repo>:latest
+docker run --rm \
+  --cap-add NET_RAW --cap-add NET_ADMIN \
+  -v "$PWD/scanner/inputs:/app/scanner/inputs" \
+  -v "$PWD/scanner/output:/app/scanner/output" \
+  -v "$PWD/scanner/config:/app/scanner/config" \
+  -v "$PWD/scanner/state:/app/scanner/state" \
+  ghcr.io/<owner>/<repo>:latest --config scanner/config/default.yaml --mode balanced
+```
+
+To cut a release build, push a tag:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
 ## Profiles
 
 - `safe`: lower packet rate, `top-100`, conservative timing, `baseline` NSE (no `vuln`), `nse_concurrency: 2`.
