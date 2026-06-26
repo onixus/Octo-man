@@ -162,8 +162,8 @@ ruff check scanner tests
 - **lint**: `ruff check`.
 - **test**: `compileall` + `pytest` on Python 3.11 and 3.12.
 - **image**: builds the image, smoke-checks the toolchain, runs an **end-to-end scan**
-  against a throwaway target container, scans the image with **Trivy**, and generates a
-  **SBOM** artifact.
+  against a throwaway target container, a **light synthetic load test** (16 docker targets),
+  scans the image with **Trivy**, and generates a **SBOM** artifact.
 
 ### End-to-end test
 
@@ -177,6 +177,29 @@ service is detected, and the report artifacts exist. Run locally:
 docker build -t network-scan-cli:ci .
 tests/e2e/run.sh network-scan-cli:ci
 ```
+
+### Synthetic load test
+
+`tests/load/run.sh` exercises the pipeline under multi-target load on a private docker network
+(no internet, no real CIDR). It spins up `N` target containers (`nginx:alpine` by default),
+runs discovery → ports → parallel NSE across batches, validates that ≥95% of targets are found,
+and records duration / peak RSS metrics.
+
+**CI (every PR):** 16 targets, config `tests/load/config.yaml`.
+
+**Heavy (manual / weekly):** workflow `.github/workflows/load-test.yml` — default 64 targets,
+`tests/load/config-heavy.yaml`, per-run dirs, optional mid-scan interrupt + `--resume`.
+
+Run locally:
+
+```bash
+docker build -t network-scan-cli:ci .
+tests/load/run.sh network-scan-cli:ci --hosts 16
+tests/load/run.sh network-scan-cli:ci --hosts 32 --config tests/load/config-heavy.yaml \
+  --run-id local-heavy --resume-test
+```
+
+For a **real-network** load run against your own CIDR (outside CI), use `scripts/load-test.sh <cidr>`.
 
 ### Image scanning & SBOM
 

@@ -74,6 +74,8 @@ jobs:
           '
       - name: End-to-end scan against a target container
         run: bash tests/e2e/run.sh network-scan-cli:ci
+      - name: Light synthetic load test (16 targets)
+        run: bash tests/load/run.sh network-scan-cli:ci --hosts 16
       - name: Trivy report (non-blocking, all severities)
         uses: aquasecurity/trivy-action@v0.36.0
         with:

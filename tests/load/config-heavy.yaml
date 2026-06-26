@@ -1,0 +1,57 @@
+# Heavy synthetic load test: per-run dirs, larger fan-out, resume checkpoint.
+runtime:
+  mode: safe
+  retries: 1
+  timeout_seconds: 1800
+  nse_timeout_seconds: 300
+  nse_concurrency: 6
+  nse_max_rate: 0
+  per_run_output: true
+
+profiles:
+  safe:
+    discover_rate: 3000
+    port_rate: 3000
+    top_ports: 100
+    nmap_timing: T4
+    nse_profile: load
+    nse_concurrency: 6
+  balanced:
+    discover_rate: 3000
+    port_rate: 3000
+    top_ports: 100
+    nmap_timing: T4
+    nse_profile: load
+    nse_concurrency: 6
+  fast:
+    discover_rate: 3000
+    port_rate: 3000
+    top_ports: 100
+    nmap_timing: T4
+    nse_profile: load
+    nse_concurrency: 6
+
+batching:
+  enabled: true
+  ipv4_prefix: 24
+  max_targets_per_batch: 16
+
+discovery:
+  source: naabu
+  skip_discovery: false
+
+ports:
+  source: naabu
+  custom_ports_file: scanner/inputs/ports.txt
+
+nse_profiles:
+  load:
+    scripts: "default"
+    version_detection: true
+    os_detection: false
+
+reporting:
+  markdown_summary: true
+  html_summary: true
+  csv_export: true
+  json_export: true
