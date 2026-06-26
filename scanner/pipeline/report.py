@@ -2,11 +2,48 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
 
 from .utils import save_json
+
+_CVE_WITH_SCORE_RE = re.compile(r"(CVE-\d{4}-\d{3,7})\s+(\d{1,2}(?:\.\d+)?)", re.IGNORECASE)
+_CVE_RE = re.compile(r"CVE-\d{4}-\d{3,7}", re.IGNORECASE)
+
+SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1, "unknown": 0}
+
+
+def _severity(cvss: float | None) -> str:
+    if cvss is None:
+        return "unknown"
+    if cvss >= 9.0:
+        return "critical"
+    if cvss >= 7.0:
+        return "high"
+    if cvss >= 4.0:
+        return "medium"
+    if cvss > 0:
+        return "low"
+    return "unknown"
+
+
+def _extract_cves(output: str) -> list[tuple[str, float | None]]:
+    """Extract (CVE, CVSS) pairs from NSE output (vulners/vulscan/vuln scripts)."""
+    found: dict[str, float | None] = {}
+    for match in _CVE_WITH_SCORE_RE.finditer(output):
+        cve = match.group(1).upper()
+        try:
+            score: float | None = float(match.group(2))
+        except ValueError:
+            score = None
+        existing = found.get(cve)
+        if cve not in found or (score is not None and (existing is None or score > existing)):
+            found[cve] = score
+    for match in _CVE_RE.finditer(output):
+        found.setdefault(match.group(0).upper(), None)
+    return list(found.items())
 
 
 def _host_address(host: ET.Element) -> str:
@@ -15,6 +52,18 @@ def _host_address(host: ET.Element) -> str:
             return address.attrib.get("addr", "unknown")
     address_node = host.find("address")
     return address_node.attrib.get("addr", "unknown") if address_node is not None else "unknown"
+
+
+def _script_record(host: str, port: str, script: ET.Element) -> dict:
+    output = (script.attrib.get("output", "") or "").strip()
+    has_cve = bool(_CVE_RE.search(output))
+    return {
+        "host": host,
+        "port": port,
+        "script_id": script.attrib.get("id", ""),
+        "output": output,
+        "vulnerable": "VULNERABLE" in output.upper() or has_cve,
+    }
 
 
 def _parse_nmap_xml(nmap_dir: Path) -> tuple[list[dict], list[dict], list[dict]]:
@@ -65,15 +114,41 @@ def _parse_nmap_xml(nmap_dir: Path) -> tuple[list[dict], list[dict], list[dict]]
     return services, os_matches, script_findings
 
 
-def _script_record(host: str, port: str, script: ET.Element) -> dict:
-    output = (script.attrib.get("output", "") or "").strip()
-    return {
-        "host": host,
-        "port": port,
-        "script_id": script.attrib.get("id", ""),
-        "output": output,
-        "vulnerable": "VULNERABLE" in output.upper(),
-    }
+def _build_vulnerabilities(script_findings: list[dict]) -> list[dict]:
+    """Turn raw NSE script output into structured, severity-ranked vulnerability findings."""
+    vulnerabilities: list[dict] = []
+    for finding in script_findings:
+        output = finding["output"]
+        cves = _extract_cves(output)
+        if cves:
+            for cve, cvss in cves:
+                vulnerabilities.append(
+                    {
+                        "host": finding["host"],
+                        "port": finding["port"],
+                        "script_id": finding["script_id"],
+                        "cve": cve,
+                        "cvss": cvss,
+                        "severity": _severity(cvss),
+                    }
+                )
+        elif "VULNERABLE" in output.upper():
+            vulnerabilities.append(
+                {
+                    "host": finding["host"],
+                    "port": finding["port"],
+                    "script_id": finding["script_id"],
+                    "cve": None,
+                    "cvss": None,
+                    "severity": "unknown",
+                }
+            )
+
+    vulnerabilities.sort(
+        key=lambda item: (SEVERITY_ORDER.get(item["severity"], 0), item["cvss"] or 0.0),
+        reverse=True,
+    )
+    return vulnerabilities
 
 
 def build_reports(
@@ -89,7 +164,9 @@ def build_reports(
 ) -> None:
     findings, os_matches, script_findings = _parse_nmap_xml(nmap_dir)
     service_counter = Counter(item["service"] for item in findings)
-    vulnerabilities = [item for item in script_findings if item["vulnerable"]]
+    vulnerabilities = _build_vulnerabilities(script_findings)
+    severity_counts = Counter(item["severity"] for item in vulnerabilities)
+    vulnerable_hosts = sorted({item["host"] for item in vulnerabilities})
 
     best_os_by_host: dict[str, dict] = {}
     for match in os_matches:
@@ -106,14 +183,25 @@ def build_reports(
         "os_detected_hosts": len(best_os_by_host),
         "nse_script_findings": len(script_findings),
         "potential_vulnerabilities": len(vulnerabilities),
+        "vulnerable_hosts": len(vulnerable_hosts),
+        "vulnerabilities_by_severity": {
+            sev: severity_counts.get(sev, 0) for sev in ("critical", "high", "medium", "low", "unknown")
+        },
         "top_services": service_counter.most_common(15),
     }
     save_json(output_dir / "summary.json", summary)
 
-    # OS and NSE/vuln findings are core deliverables and always exported.
+    # OS and vulnerability findings are core deliverables and always exported.
     save_json(output_dir / "os_findings.json", os_matches)
     save_json(output_dir / "script_findings.json", script_findings)
     save_json(output_dir / "vulnerabilities.json", vulnerabilities)
+
+    vuln_csv = output_dir / "vulnerabilities.csv"
+    with vuln_csv.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=["host", "port", "severity", "cvss", "cve", "script_id"])
+        writer.writeheader()
+        for item in vulnerabilities:
+            writer.writerow({key: item.get(key, "") for key in writer.fieldnames})
 
     if json_export:
         save_json(output_dir / "findings.json", findings)
@@ -130,6 +218,7 @@ def build_reports(
             writer.writerows(findings)
 
     if markdown_summary:
+        sev = summary["vulnerabilities_by_severity"]
         md_lines = [
             "# Scan Summary",
             "",
@@ -139,7 +228,10 @@ def build_reports(
             f"- Parsed open services from Nmap XML: {summary['nmap_open_services']}",
             f"- Hosts with OS detected: {summary['os_detected_hosts']}",
             f"- NSE script findings: {summary['nse_script_findings']}",
-            f"- Potential vulnerabilities: {summary['potential_vulnerabilities']}",
+            f"- Potential vulnerabilities: {summary['potential_vulnerabilities']} "
+            f"(across {summary['vulnerable_hosts']} hosts)",
+            f"- Severity: critical {sev['critical']}, high {sev['high']}, "
+            f"medium {sev['medium']}, low {sev['low']}, unknown {sev['unknown']}",
             "",
             "## Top Services",
         ]
@@ -153,11 +245,15 @@ def build_reports(
         else:
             md_lines.append("- none detected")
 
-        md_lines += ["", "## Potential Vulnerabilities"]
+        md_lines += ["", "## Vulnerabilities (highest severity first)"]
         if vulnerabilities:
-            for item in vulnerabilities:
+            for item in vulnerabilities[:50]:
                 location = f"{item['host']}:{item['port']}" if item["port"] else item["host"]
-                md_lines.append(f"- {location} [{item['script_id']}]")
+                cve = item["cve"] or item["script_id"]
+                cvss = f" CVSS {item['cvss']}" if item["cvss"] is not None else ""
+                md_lines.append(f"- [{item['severity'].upper()}] {location} {cve}{cvss} ({item['script_id']})")
+            if len(vulnerabilities) > 50:
+                md_lines.append(f"- ... and {len(vulnerabilities) - 50} more (see vulnerabilities.json)")
         else:
             md_lines.append("- none detected")
 
