@@ -13,7 +13,7 @@ from scanner.pipeline.batch_runner import run_batches_parallel
 from scanner.pipeline.checkpoint import CheckpointStore
 from scanner.pipeline.config_schema import AppConfig, format_validation_error, load_config
 from scanner.pipeline.contract import validate_inputs
-from scanner.pipeline.discover import host_discovery
+from scanner.pipeline.discovery_runner import run_discovery_stage, verify_alive_without_ports
 from scanner.pipeline.errors import StageFailureError
 from scanner.pipeline.nse import run_nse
 from scanner.pipeline.ports import fast_port_scan
@@ -31,6 +31,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["safe", "balanced", "fast"], help="Override speed profile")
     parser.add_argument("--run-id", help="Run identifier for per-run output dirs (required for explicit resume)")
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoint")
+    parser.add_argument(
+        "--skip-nse",
+        action="store_true",
+        help="Skip NSE stage (discover + ports + reports only); re-run with --resume to enrich",
+    )
     return parser.parse_args()
 
 
@@ -112,29 +117,18 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     if args.resume and checkpoint.is_done("discover"):
         alive_hosts = sorted(set(read_lines(alive_file)))
     else:
-        alive_set: set[str] = set(read_lines(alive_file)) if args.resume else set()
-        batches = make_batches(all_targets)
-        run_batches_parallel(
-            stage="discover",
-            batches=batches,
-            done_ids=checkpoint.done_items("discover"),
-            concurrency=runtime.discover_concurrency,
-            process_batch=lambda bid, members: host_discovery(
-                members,
-                output_dir=paths.output_dir,
-                rate=profile.discover_rate,
-                timeout=timeout,
-                retries=retries,
-                skip_discovery=config.discovery.skip_discovery,
-                tag=bid,
-            ),
-            aggregate=alive_set,
-            aggregate_file=alive_file,
+        alive_hosts = run_discovery_stage(
+            all_targets=all_targets,
+            config=config,
+            profile=profile,
+            output_dir=paths.output_dir,
+            alive_file=alive_file,
+            timeout=timeout,
+            retries=retries,
             checkpoint=checkpoint,
-            checkpoint_key="discover",
+            resume=args.resume,
+            make_batches=make_batches,
         )
-        checkpoint.mark_done("discover")
-        alive_hosts = sorted(alive_set)
 
     open_file = paths.output_dir / "open_ports.txt"
     if args.resume and checkpoint.is_done("ports"):
@@ -172,8 +166,24 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         checkpoint.mark_done("ports")
         open_ports = sorted(open_set)
 
-    if args.resume and checkpoint.is_done("nse"):
-        nmap_dir = paths.output_dir / "nmap"
+    alive_hosts = verify_alive_without_ports(
+        alive_hosts=alive_hosts,
+        open_ports=open_ports,
+        config=config,
+        profile=profile,
+        output_dir=paths.output_dir,
+        timeout=timeout,
+        retries=retries,
+    )
+    write_lines(alive_file, alive_hosts)
+
+    skip_nse = args.skip_nse or runtime.skip_nse
+    nmap_dir = paths.output_dir / "nmap"
+    if skip_nse:
+        logging.info("Skipping NSE stage (skip_nse enabled)")
+        nmap_dir.mkdir(parents=True, exist_ok=True)
+    elif args.resume and checkpoint.is_done("nse"):
+        pass
     else:
         nse_profile = config.nse_profiles[profile.nse_profile]
         nse_timeout = runtime.nse_timeout_seconds

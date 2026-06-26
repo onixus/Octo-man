@@ -75,8 +75,27 @@ def test_build_nmap_command_multi_host():
         per_process_rate=0,
         scan_protocol="tcp",
     )
-    assert ["-p", "80", "10.0.0.1"] in [cmd[i : i + 3] for i in range(len(cmd) - 2)]
-    assert ["-p", "22,443", "10.0.0.2"] in [cmd[i : i + 3] for i in range(len(cmd) - 2)]
+    p_idx = cmd.index("-p")
+    assert cmd[p_idx + 1] == "22,80,443"
+    assert cmd[p_idx + 2 : p_idx + 4] == ["10.0.0.1", "10.0.0.2"]
+    assert cmd.count("-p") == 1
+
+
+def test_build_nmap_command_multi_host_same_port():
+    cmd = _build_nmap_command(
+        {"10.99.0.2": ["80"], "10.99.0.3": ["80"]},
+        Path("/tmp/out/group"),
+        scripts="default",
+        version_detection=True,
+        os_detection=False,
+        nmap_timing="T4",
+        per_process_rate=0,
+        scan_protocol="tcp",
+    )
+    p_idx = cmd.index("-p")
+    assert cmd[p_idx + 1] == "80"
+    assert cmd[p_idx + 2 : p_idx + 4] == ["10.99.0.2", "10.99.0.3"]
+    assert cmd.count("-p") == 1
 
 
 def test_chunk_host_ports_groups_hosts():
