@@ -115,6 +115,7 @@ Tune profile parameters in `scanner/config/default.yaml`.
 - `nse_profiles.<name>.scripts`: Nmap `--script` selector (e.g. `default,safe,vuln`).
 - `nse_profiles.<name>.os_detection`: enables `nmap -O --osscan-guess`.
 - `runtime.nse_concurrency` / `profiles.<name>.nse_concurrency`: number of nmap processes run in parallel.
+- `runtime.nse_max_rate` / `profiles.<name>.nse_max_rate`: global packets/sec budget for the NSE/OS stage. It is split across the parallel nmap processes (each gets `nse_max_rate / nse_concurrency` via `nmap --max-rate`). `0` means unlimited (rely on the timing template). This keeps aggregate scan noise bounded regardless of concurrency.
 - `runtime.nse_timeout_seconds`: per-host nmap timeout (independent of the global command timeout).
 
 OS detection and SYN/ICMP probing require raw sockets. The container is granted
