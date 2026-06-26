@@ -56,6 +56,10 @@ CONFIG_SRC="${ROOT_DIR}/${CONFIG_REL}"
 START_TS="$(date +%s)"
 
 cleanup() {
+  if [[ "${KEEP_WORK:-0}" == "1" ]]; then
+    echo "[load] KEEP_WORK=1 — leaving ${WORK}" >&2
+    return 0
+  fi
   docker rm -f "${SCANNER_NAME}" >/dev/null 2>&1 || true
   for name in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep "^load-target-${NET}-" || true); do
     docker rm -f "${name}" >/dev/null 2>&1 || true
@@ -127,6 +131,16 @@ docker_scan() {
     "${IMAGE}" "${scanner_args[@]}" "$@"
 }
 
+_run_with_timeout() {
+  local limit="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${limit}" "$@"
+  else
+    "$@"
+  fi
+}
+
 _start_peak_monitor() {
   echo 0 > "${PEAK_FILE}"
   python3 - "${SCANNER_NAME}" "${PEAK_FILE}" <<'PY' &
@@ -148,14 +162,19 @@ def to_kb(value: str, unit: str) -> int:
     return int(num * mult.get(unit, 1))
 
 while True:
-    proc = subprocess.run(["docker", "inspect", name], capture_output=True)
+    proc = subprocess.run(["docker", "inspect", name], capture_output=True, timeout=5)
     if proc.returncode != 0:
         break
-    proc = subprocess.run(
-        ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", name],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", name],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        time.sleep(1)
+        continue
     if proc.returncode == 0 and proc.stdout.strip():
         first = proc.stdout.strip().split()[0]
         m = pat.match(first)
@@ -170,8 +189,18 @@ PY
 
 _stop_peak_monitor() {
   local mon_pid="$1"
+  local waited=0
+  while kill -0 "${mon_pid}" 2>/dev/null && (( waited < 15 )); do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  kill "${mon_pid}" 2>/dev/null || true
   wait "${mon_pid}" 2>/dev/null || true
   cat "${PEAK_FILE}"
+}
+
+_resume_interrupt_stage() {
+  echo "ports"
 }
 
 _checkpoint_path() {
@@ -201,6 +230,8 @@ stages = data.get("stages", {})
 def has(stage: str) -> bool:
     return bool(items.get(stage)) or bool(stages.get(stage))
 
+if want == "discover" and has("discover"):
+    raise SystemExit(0)
 if want == "ports" and has("ports"):
     raise SystemExit(0)
 if want == "nse" and has("nse"):
@@ -216,8 +247,8 @@ PY
     if (( elapsed > 0 && elapsed % 30 == 0 )); then
       echo "[load] still waiting for checkpoint (${want}, ${elapsed}s) at ${ckpt}"
     fi
-    sleep 2
-    elapsed=$((elapsed + 2))
+    sleep 1
+    elapsed=$((elapsed + 1))
   done
   return 1
 }
@@ -236,34 +267,56 @@ if [[ "${RESUME_TEST}" -eq 1 ]]; then
     -v "${WORK}/state:/app/scanner/state" \
     "${IMAGE}" "${scanner_args[@]}" >/dev/null
 
-  mon_pid="$(_start_peak_monitor)"
   ckpt="$(_checkpoint_path)"
-  # Interrupt after port-scan progress (meaningful resume point, faster with skip_discovery).
-  if ! _wait_for_checkpoint_progress "${ckpt}" 300 ports; then
-    echo "[load] timed out waiting for ports checkpoint progress at ${ckpt}" >&2
+  interrupt_stage="$(_resume_interrupt_stage)"
+  ckpt_timeout="${CHECKPOINT_TIMEOUT_SEC:-120}"
+  # Interrupt before NSE: with skip_discovery, discover finishes instantly (safe cut point).
+  if ! _wait_for_checkpoint_progress "${ckpt}" "${ckpt_timeout}" "${interrupt_stage}"; then
+    echo "[load] timed out waiting for ${interrupt_stage} checkpoint progress at ${ckpt}" >&2
     docker logs "${SCANNER_NAME}" 2>&1 | tail -50 || true
     exit 1
   fi
-  echo "[load] ports checkpoint progress detected; stopping scanner for resume"
-  docker stop -t 10 "${SCANNER_NAME}" >/dev/null 2>&1 || true
+  echo "[load] ${interrupt_stage} checkpoint progress detected; stopping scanner for resume"
+  docker kill "${SCANNER_NAME}" >/dev/null 2>&1 || true
   docker rm -f "${SCANNER_NAME}" >/dev/null 2>&1 || true
-  peak1="$(_stop_peak_monitor "${mon_pid}")"
 
   echo "[load] resuming scan (--resume --run-id ${RUN_ID})"
   mon_pid="$(_start_peak_monitor)"
+  scan_timeout="${SCAN_TIMEOUT_SEC:-2400}"
   set +e
-  docker_scan --resume
+  _run_with_timeout "${scan_timeout}" docker run --rm --network "${NET}" \
+    --cap-add NET_RAW --cap-add NET_ADMIN \
+    --name "${SCANNER_NAME}" \
+    -v "${WORK}/inputs:/app/scanner/inputs" \
+    -v "${WORK}/config:/app/scanner/config" \
+    -v "${WORK}/output:/app/scanner/output" \
+    -v "${WORK}/state:/app/scanner/state" \
+    "${IMAGE}" "${scanner_args[@]}" --resume
   SCAN_RC=$?
   set -e
+  if [[ "${SCAN_RC}" -eq 124 ]]; then
+    echo "[load] resume scan exceeded ${scan_timeout}s timeout" >&2
+  fi
   peak2="$(_stop_peak_monitor "${mon_pid}")"
-  PEAK_RSS_KB=$((peak1 > peak2 ? peak1 : peak2))
+  PEAK_RSS_KB="${peak2}"
 else
   echo "[load] running scanner (${HOST_COUNT} targets)"
   mon_pid="$(_start_peak_monitor)"
+  scan_timeout="${SCAN_TIMEOUT_SEC:-2400}"
   set +e
-  docker_scan
+  _run_with_timeout "${scan_timeout}" docker run --rm --network "${NET}" \
+    --cap-add NET_RAW --cap-add NET_ADMIN \
+    --name "${SCANNER_NAME}" \
+    -v "${WORK}/inputs:/app/scanner/inputs" \
+    -v "${WORK}/config:/app/scanner/config" \
+    -v "${WORK}/output:/app/scanner/output" \
+    -v "${WORK}/state:/app/scanner/state" \
+    "${IMAGE}" "${scanner_args[@]}"
   SCAN_RC=$?
   set -e
+  if [[ "${SCAN_RC}" -eq 124 ]]; then
+    echo "[load] scan exceeded ${scan_timeout}s timeout" >&2
+  fi
   PEAK_RSS_KB="$(_stop_peak_monitor "${mon_pid}")"
 fi
 

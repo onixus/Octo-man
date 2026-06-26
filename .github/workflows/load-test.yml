@@ -42,10 +42,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Run heavy load test
+        timeout-minutes: 45
         env:
           HOSTS: ${{ github.event.inputs.host_count || '32' }}
           # Scheduled runs skip resume (full scan only); manual dispatch defaults to resume test.
           RESUME: ${{ github.event_name == 'schedule' && '0' || (github.event.inputs.resume_test != false && '1' || '0') }}
+          CHECKPOINT_TIMEOUT_SEC: "120"
+          SCAN_TIMEOUT_SEC: "1800"
           METRICS_COPY_TO: ${{ github.workspace }}/load-metrics-${{ github.run_id }}.json
         run: |
           set -euo pipefail
