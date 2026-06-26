@@ -92,6 +92,15 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
   - writes a temporary CIDR target;
   - runs `fast` profile in container.
 
+## Tests
+
+Unit tests cover the pure helpers (input validation, port grouping, custom port parsing):
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
 ## Profiles
 
 - `safe`: lower packet rate, `top-100`, conservative timing.

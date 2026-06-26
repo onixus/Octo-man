@@ -83,6 +83,13 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
 ./scripts/load-test.sh 10.0.0.0/16
 ```
 
+- Модульные тесты чистых функций:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
 ## Эксплуатационные замечания
 
 - Сканируйте только сети, где есть официальное разрешение.
