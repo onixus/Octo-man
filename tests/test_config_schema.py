@@ -94,3 +94,4 @@ def test_default_yaml_parses():
     assert cfg.runtime.nse_timeout_seconds == 600
     assert cfg.runtime.discover_concurrency == 4
     assert cfg.runtime.ports_concurrency == 4
+    assert cfg.runtime.nse_hosts_per_scan == 8

@@ -186,6 +186,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
                 retries=retries,
                 concurrency=nse_concurrency,
                 max_rate=nse_max_rate,
+                hosts_per_scan=runtime.nse_hosts_per_scan,
                 done_hosts=checkpoint.done_items("nse") if args.resume else set(),
                 on_host_done=lambda host: checkpoint.mark_item_done("nse", host),
             ),
