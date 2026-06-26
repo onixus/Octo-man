@@ -40,6 +40,18 @@ profiles:
     nse_concurrency: 8
     nse_max_rate: 5000
 
+batching:
+  # Split work into resumable batches so a single huge naabu command never
+  # hits the global timeout, a failed batch does not abort the whole run, and
+  # --resume skips finished batches.
+  enabled: true
+  # IPv4 networks larger than this prefix are split into /ipv4_prefix batches
+  # (e.g. a /16 becomes 16 x /20). Use a larger number (e.g. 24) for finer
+  # resume granularity at the cost of more naabu invocations.
+  ipv4_prefix: 20
+  # Single IPs / IPv6 / small nets are grouped into batches of this many targets.
+  max_targets_per_batch: 4096
+
 discovery:
   source: naabu
   skip_discovery: false

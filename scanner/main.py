@@ -4,6 +4,7 @@ import argparse
 import logging
 from pathlib import Path
 
+from scanner.pipeline.batching import expand_batches, single_batch
 from scanner.pipeline.checkpoint import CheckpointStore
 from scanner.pipeline.contract import validate_inputs
 from scanner.pipeline.discover import host_discovery
@@ -11,7 +12,7 @@ from scanner.pipeline.nse import run_nse
 from scanner.pipeline.ports import fast_port_scan
 from scanner.pipeline.report import build_reports
 from scanner.pipeline.resolve import resolve_fqdns
-from scanner.pipeline.utils import load_yaml, setup_logging, write_lines
+from scanner.pipeline.utils import load_yaml, read_lines, setup_logging, write_lines
 
 
 def parse_args() -> argparse.Namespace:
@@ -64,32 +65,75 @@ def main() -> int:
     all_targets = sorted(set(contract.valid_ips_or_cidr + resolved_ips))
     write_lines(output_dir / "all_targets.txt", all_targets)
 
-    if args.resume and checkpoint.is_done("discover"):
-        alive_hosts = [line.strip() for line in (output_dir / "alive_ips.txt").read_text(encoding="utf-8").splitlines() if line.strip()]
-    else:
-        alive_hosts = host_discovery(
-            all_targets,
-            output_dir=output_dir,
-            rate=int(profile.get("discover_rate", 3000)),
-            timeout=timeout,
-            retries=retries,
-            skip_discovery=bool(config.get("discovery", {}).get("skip_discovery", False)),
-        )
-        checkpoint.mark_done("discover")
+    batching_cfg = config.get("batching", {})
+    batching_enabled = bool(batching_cfg.get("enabled", True))
+    ipv4_prefix = int(batching_cfg.get("ipv4_prefix", 20))
+    max_per_batch = int(batching_cfg.get("max_targets_per_batch", 4096))
 
-    if args.resume and checkpoint.is_done("ports"):
-        open_ports = [line.strip() for line in (output_dir / "open_ports.txt").read_text(encoding="utf-8").splitlines() if line.strip()]
+    def make_batches(items: list[str]) -> list[tuple[str, list[str]]]:
+        if batching_enabled:
+            return expand_batches(items, ipv4_prefix=ipv4_prefix, max_targets_per_batch=max_per_batch)
+        return single_batch(items)
+
+    alive_file = output_dir / "alive_ips.txt"
+    if args.resume and checkpoint.is_done("discover"):
+        alive_hosts = sorted(set(read_lines(alive_file)))
     else:
-        open_ports = fast_port_scan(
-            alive_hosts,
-            output_dir=output_dir,
-            rate=int(profile.get("port_rate", 3000)),
-            top_ports=int(profile.get("top_ports", 1000)),
-            timeout=timeout,
-            retries=retries,
-            custom_ports_file=Path(config.get("ports", {}).get("custom_ports_file", "scanner/inputs/ports.txt")),
-        )
+        alive_set: set[str] = set(read_lines(alive_file)) if args.resume else set()
+        done_discover = checkpoint.done_items("discover")
+        skip_discovery = bool(config.get("discovery", {}).get("skip_discovery", False))
+        discover_rate = int(profile.get("discover_rate", 3000))
+        batches = make_batches(all_targets)
+        logging.info("Discovery: %s batch(es)", len(batches))
+        for index, (bid, members) in enumerate(batches, start=1):
+            if bid in done_discover:
+                continue
+            logging.info("Discovery batch %s/%s (%s)", index, len(batches), bid)
+            batch_alive = host_discovery(
+                members,
+                output_dir=output_dir,
+                rate=discover_rate,
+                timeout=timeout,
+                retries=retries,
+                skip_discovery=skip_discovery,
+                tag=bid,
+            )
+            alive_set.update(batch_alive)
+            write_lines(alive_file, sorted(alive_set))
+            checkpoint.mark_item_done("discover", bid)
+        checkpoint.mark_done("discover")
+        alive_hosts = sorted(alive_set)
+
+    open_file = output_dir / "open_ports.txt"
+    if args.resume and checkpoint.is_done("ports"):
+        open_ports = sorted(set(read_lines(open_file)))
+    else:
+        open_set: set[str] = set(read_lines(open_file)) if args.resume else set()
+        done_ports = checkpoint.done_items("ports")
+        port_rate = int(profile.get("port_rate", 3000))
+        top_ports = int(profile.get("top_ports", 1000))
+        custom_ports_file = Path(config.get("ports", {}).get("custom_ports_file", "scanner/inputs/ports.txt"))
+        batches = make_batches(alive_hosts)
+        logging.info("Port scan: %s batch(es)", len(batches))
+        for index, (bid, members) in enumerate(batches, start=1):
+            if bid in done_ports:
+                continue
+            logging.info("Port-scan batch %s/%s (%s)", index, len(batches), bid)
+            batch_open = fast_port_scan(
+                members,
+                output_dir=output_dir,
+                rate=port_rate,
+                top_ports=top_ports,
+                timeout=timeout,
+                retries=retries,
+                custom_ports_file=custom_ports_file,
+                tag=bid,
+            )
+            open_set.update(batch_open)
+            write_lines(open_file, sorted(open_set))
+            checkpoint.mark_item_done("ports", bid)
         checkpoint.mark_done("ports")
+        open_ports = sorted(open_set)
 
     if args.resume and checkpoint.is_done("nse"):
         nmap_dir = output_dir / "nmap"
@@ -110,6 +154,8 @@ def main() -> int:
             retries=retries,
             concurrency=nse_concurrency,
             max_rate=nse_max_rate,
+            done_hosts=checkpoint.done_items("nse") if args.resume else set(),
+            on_host_done=lambda host: checkpoint.mark_item_done("nse", host),
         )
         checkpoint.mark_done("nse")
 
