@@ -9,11 +9,11 @@ services:
     cap_add:
       - NET_RAW
       - NET_ADMIN
-    # Prevent a large /16 NSE fan-out from exhausting the host.
-    mem_limit: 4g
-    cpus: "4.0"
+    # Sized for aggressive /16 scans: fast profile (8× nmap) + 4× parallel naabu.
+    mem_limit: 8g
+    cpus: "8.0"
     ulimits:
-      nproc: 512
+      nproc: 1024
       nofile:
         soft: 65536
         hard: 65536
@@ -22,4 +22,4 @@ services:
       - ./scanner/config:/app/scanner/config
       - ./scanner/output:/app/scanner/output
       - ./scanner/state:/app/scanner/state
-    command: ["--config", "scanner/config/default.yaml", "--mode", "balanced"]
+    command: ["--config", "scanner/config/default.yaml", "--mode", "fast"]

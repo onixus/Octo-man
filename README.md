@@ -131,8 +131,9 @@ Pipeline logs use a **rotating file** at `logs_dir/pipeline.log` (defaults:
 ## Resource limits (Docker Compose)
 
 `docker-compose.yml` sets container limits to reduce the risk of host exhaustion during large
-scans: `mem_limit: 4g`, `cpus: "4.0"`, and raised `nproc`/`nofile` ulimits. Adjust for your
-host capacity.
+scans: `mem_limit: 8g`, `cpus: "8.0"`, and raised `nproc`/`nofile` ulimits (sized for
+`--mode fast`: 8 parallel nmap + 4 parallel naabu batches). Lower for `safe`/`balanced`
+on smaller hosts.
 
 ## Validation Helpers
 
