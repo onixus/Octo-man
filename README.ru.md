@@ -111,8 +111,11 @@ YAML проверяется при старте через **Pydantic** (`scanne
 - IPv4-сети крупнее `batching.ipv4_prefix` дробятся на батчи `/ipv4_prefix`
   (например, `/16` → 16 × `/20`). Одиночные IP, IPv6 и мелкие сети группируются по
   `batching.max_targets_per_batch`.
-- Discovery и port-scan идут **побатчево**; живые хосты и открытые порты
-  инкрементально агрегируются в `alive_ips.txt` / `open_ports.txt`.
+- Discovery и port-scan идут **побатчево** (опционально **параллельно** через
+  `runtime.discover_concurrency` / `runtime.ports_concurrency`); живые хосты и открытые
+  порты инкрементально агрегируются в `alive_ips.txt` / `open_ports.txt`. Каждый
+  параллельный naabu использует `discover_rate` / `port_rate` профиля — суммарный
+  сетевой шум ≈ `rate × concurrency`.
 - Этап NSE/OS чекпойнтится **по хостам** — `--resume` пропускает уже отсканированные.
 - Прогресс — в `scanner/state/checkpoint.json` (флаги стадий + множества элементов:
   id батчей `discover`/`ports`, хосты `nse`). Запись потокобезопасна и атомарна по элементу.
@@ -123,6 +126,9 @@ YAML проверяется при старте через **Pydantic** (`scanne
 
 ## Параллелизм и таймауты NSE
 
+- `runtime.discover_concurrency` / `runtime.ports_concurrency` — число параллельных
+  батчей naabu на этапах discovery и port-scan (по умолчанию `4`). `1` — строго
+  последовательно. Эффективный pps ≈ `rate × concurrency`.
 - `runtime.nse_concurrency` / `profiles.<name>.nse_concurrency` — число одновременно запускаемых процессов nmap. Увеличивайте под мощность хоста и допустимый сетевой шум.
 - `runtime.nse_max_rate` / `profiles.<name>.nse_max_rate` — глобальный бюджет пакетов/сек на этап NSE/OS. Делится между параллельными процессами nmap (каждый получает `nse_max_rate / nse_concurrency` через `nmap --max-rate`). `0` — без ограничения (полагаемся на тайминг-шаблон). Так совокупный шум скана остаётся ограниченным независимо от уровня параллелизма.
 - `runtime.nse_timeout_seconds` — таймаут nmap на один хост (отдельно от глобального `timeout_seconds`; максимум **600** с / 10 мин).

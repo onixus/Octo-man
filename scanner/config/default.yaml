@@ -12,6 +12,9 @@ runtime:
   # Global packets/sec budget for the NSE/OS stage, shared across all parallel
   # nmap processes (each gets nse_max_rate / nse_concurrency). 0 = unlimited.
   nse_max_rate: 0
+  # Parallel naabu batches for discovery and port scan (each batch is independent).
+  discover_concurrency: 4
+  ports_concurrency: 4
   keep_intermediate: true
   # Each run writes to output_dir/runs/<run_id>/ and state_dir/runs/<run_id>/.
   per_run_output: true

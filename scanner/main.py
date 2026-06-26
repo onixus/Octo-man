@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from scanner import exit_codes
 from scanner.pipeline.batching import expand_batches, single_batch
+from scanner.pipeline.batch_runner import run_batches_parallel
 from scanner.pipeline.checkpoint import CheckpointStore
 from scanner.pipeline.config_schema import AppConfig, format_validation_error, load_config
 from scanner.pipeline.contract import validate_inputs
@@ -112,28 +113,26 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         alive_hosts = sorted(set(read_lines(alive_file)))
     else:
         alive_set: set[str] = set(read_lines(alive_file)) if args.resume else set()
-        done_discover = checkpoint.done_items("discover")
         batches = make_batches(all_targets)
-        logging.info("Discovery: %s batch(es)", len(batches))
-        for index, (bid, members) in enumerate(batches, start=1):
-            if bid in done_discover:
-                continue
-            logging.info("Discovery batch %s/%s (%s)", index, len(batches), bid)
-            batch_alive = _run_stage(
-                "discover",
-                lambda m=members, b=bid: host_discovery(
-                    m,
-                    output_dir=paths.output_dir,
-                    rate=profile.discover_rate,
-                    timeout=timeout,
-                    retries=retries,
-                    skip_discovery=config.discovery.skip_discovery,
-                    tag=b,
-                ),
-            )
-            alive_set.update(batch_alive)
-            write_lines(alive_file, sorted(alive_set))
-            checkpoint.mark_item_done("discover", bid)
+        run_batches_parallel(
+            stage="discover",
+            batches=batches,
+            done_ids=checkpoint.done_items("discover"),
+            concurrency=runtime.discover_concurrency,
+            process_batch=lambda bid, members: host_discovery(
+                members,
+                output_dir=paths.output_dir,
+                rate=profile.discover_rate,
+                timeout=timeout,
+                retries=retries,
+                skip_discovery=config.discovery.skip_discovery,
+                tag=bid,
+            ),
+            aggregate=alive_set,
+            aggregate_file=alive_file,
+            checkpoint=checkpoint,
+            checkpoint_key="discover",
+        )
         checkpoint.mark_done("discover")
         alive_hosts = sorted(alive_set)
 
@@ -142,30 +141,28 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         open_ports = sorted(set(read_lines(open_file)))
     else:
         open_set: set[str] = set(read_lines(open_file)) if args.resume else set()
-        done_ports = checkpoint.done_items("ports")
         custom_ports_file = Path(config.ports.custom_ports_file)
         batches = make_batches(alive_hosts)
-        logging.info("Port scan: %s batch(es)", len(batches))
-        for index, (bid, members) in enumerate(batches, start=1):
-            if bid in done_ports:
-                continue
-            logging.info("Port-scan batch %s/%s (%s)", index, len(batches), bid)
-            batch_open = _run_stage(
-                "ports",
-                lambda m=members, b=bid: fast_port_scan(
-                    m,
-                    output_dir=paths.output_dir,
-                    rate=profile.port_rate,
-                    top_ports=profile.top_ports,
-                    timeout=timeout,
-                    retries=retries,
-                    custom_ports_file=custom_ports_file,
-                    tag=b,
-                ),
-            )
-            open_set.update(batch_open)
-            write_lines(open_file, sorted(open_set))
-            checkpoint.mark_item_done("ports", bid)
+        run_batches_parallel(
+            stage="ports",
+            batches=batches,
+            done_ids=checkpoint.done_items("ports"),
+            concurrency=runtime.ports_concurrency,
+            process_batch=lambda bid, members: fast_port_scan(
+                members,
+                output_dir=paths.output_dir,
+                rate=profile.port_rate,
+                top_ports=profile.top_ports,
+                timeout=timeout,
+                retries=retries,
+                custom_ports_file=custom_ports_file,
+                tag=bid,
+            ),
+            aggregate=open_set,
+            aggregate_file=open_file,
+            checkpoint=checkpoint,
+            checkpoint_key="ports",
+        )
         checkpoint.mark_done("ports")
         open_ports = sorted(open_set)
 

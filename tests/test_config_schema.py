@@ -78,6 +78,13 @@ def test_load_config_rejects_nse_timeout_above_ten_minutes():
         load_config(raw)
 
 
+def test_load_config_rejects_invalid_batch_concurrency():
+    raw = _minimal_config()
+    raw["runtime"] = {"discover_concurrency": 0}
+    with pytest.raises(ValidationError):
+        load_config(raw)
+
+
 def test_default_yaml_parses():
     import yaml
 
@@ -85,3 +92,5 @@ def test_default_yaml_parses():
     cfg = AppConfig.model_validate(yaml.safe_load(text))
     assert cfg.runtime.per_run_output is True
     assert cfg.runtime.nse_timeout_seconds == 600
+    assert cfg.runtime.discover_concurrency == 4
+    assert cfg.runtime.ports_concurrency == 4
