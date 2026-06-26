@@ -96,14 +96,20 @@ def main() -> int:
     else:
         nse_profile_name = profile.get("nse_profile", "baseline")
         nse_profile = config.get("nse_profiles", {}).get(nse_profile_name, {})
+        nse_timeout = int(runtime.get("nse_timeout_seconds", timeout))
+        nse_concurrency = int(profile.get("nse_concurrency", runtime.get("nse_concurrency", 4)))
+        nse_max_rate = int(profile.get("nse_max_rate", runtime.get("nse_max_rate", 0)))
         nmap_dir = run_nse(
             open_ports,
             output_dir=output_dir,
             scripts=str(nse_profile.get("scripts", "default,safe")),
             version_detection=bool(nse_profile.get("version_detection", True)),
+            os_detection=bool(nse_profile.get("os_detection", False)),
             nmap_timing=str(profile.get("nmap_timing", "T4")),
-            timeout=timeout,
+            timeout=nse_timeout,
             retries=retries,
+            concurrency=nse_concurrency,
+            max_rate=nse_max_rate,
         )
         checkpoint.mark_done("nse")
 

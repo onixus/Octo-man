@@ -5,6 +5,10 @@ services:
       dockerfile: Dockerfile
     image: network-scan-cli:latest
     container_name: network-scan-cli
+    # naabu host discovery / SYN scans need raw socket capabilities.
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
     volumes:
       - ./scanner/inputs:/app/scanner/inputs
       - ./scanner/config:/app/scanner/config

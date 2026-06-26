@@ -17,7 +17,7 @@ def resolve_fqdns(
         save_json(output_dir / "dns_resolution.json", {"records": []})
         return []
 
-    input_file = output_dir / "fqdn_targets.txt"
+    input_file = output_dir / "normalized" / "fqdn_targets.txt"
     json_out = output_dir / "dnsx_records.jsonl"
     input_file.parent.mkdir(parents=True, exist_ok=True)
     input_file.write_text("\n".join(fqdns) + "\n", encoding="utf-8")
