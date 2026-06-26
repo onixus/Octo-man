@@ -300,6 +300,8 @@ Tune profile parameters in `scanner/config/default.yaml`.
 - `nse_profiles.<name>.scripts`: Nmap `--script` selector (e.g. `default,safe,vuln`).
 - `nse_profiles.<name>.os_detection`: enables `nmap -O --osscan-guess`.
 - `runtime.nse_concurrency` / `profiles.<name>.nse_concurrency`: number of nmap processes run in parallel.
+- `runtime.nse_hosts_per_scan`: hosts scanned per nmap process (default `8`). Reduces nmap
+  startup overhead by grouping multiple targets in one invocation; checkpoint remains per host.
 - `runtime.discover_concurrency` / `runtime.ports_concurrency`: number of naabu
   discovery/port batches run in parallel (default `4`). Set to `1` for strictly serial
   behavior. Effective pps ≈ `rate × concurrency`.

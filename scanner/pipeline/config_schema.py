@@ -15,6 +15,7 @@ class RuntimeConfig(BaseModel):
     nse_timeout_seconds: int = Field(default=600, ge=30, le=600)
     nse_concurrency: int = Field(default=4, ge=1, le=64)
     nse_max_rate: int = Field(default=0, ge=0)
+    nse_hosts_per_scan: int = Field(default=1, ge=1, le=256)
     discover_concurrency: int = Field(default=1, ge=1, le=32)
     ports_concurrency: int = Field(default=1, ge=1, le=32)
     keep_intermediate: bool = True

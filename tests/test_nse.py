@@ -4,6 +4,9 @@ from pathlib import Path
 
 from scanner.pipeline.nse import (
     _build_nmap_command,
+    _chunk_host_ports,
+    _format_nmap_host,
+    _group_output_basename,
     _group_ports_by_host,
     _parse_host_port,
     _per_process_rate,
@@ -50,6 +53,11 @@ def test_safe_filename_replaces_separators():
     assert _safe_filename("2001:db8::1") == "2001_db8__1"
 
 
+def test_format_nmap_host_brackets_ipv6():
+    assert _format_nmap_host("2001:db8::1") == "[2001:db8::1]"
+    assert _format_nmap_host("10.0.0.1") == "10.0.0.1"
+
+
 def test_per_process_rate_splits_budget():
     assert _per_process_rate(2000, 4) == 500
     assert _per_process_rate(0, 4) == 0  # unlimited
@@ -57,10 +65,9 @@ def test_per_process_rate_splits_budget():
     assert _per_process_rate(1000, 0) == 1000  # guards against zero workers
 
 
-def test_build_nmap_command_includes_os_and_rate():
+def test_build_nmap_command_single_host():
     cmd = _build_nmap_command(
-        "10.0.0.1",
-        ["80", "443"],
+        {"10.0.0.1": ["80", "443"]},
         Path("/tmp/out/10.0.0.1"),
         scripts="default,safe,vuln",
         version_detection=True,
@@ -72,13 +79,41 @@ def test_build_nmap_command_includes_os_and_rate():
     assert "-O" in cmd and "--osscan-guess" in cmd
     assert cmd[cmd.index("--max-rate") + 1] == "500"
     assert cmd[cmd.index("-p") + 1] == "80,443"
-    assert cmd[-1] == "10.0.0.1"
+    assert cmd[-1] == "/tmp/out/10.0.0.1"
+    assert "10.0.0.1" in cmd
+
+
+def test_build_nmap_command_multi_host_different_ports():
+    cmd = _build_nmap_command(
+        {"10.0.0.1": ["80"], "10.0.0.2": ["22", "443"]},
+        Path("/tmp/out/group_abc"),
+        scripts="default,safe",
+        version_detection=False,
+        os_detection=False,
+        nmap_timing="T3",
+        per_process_rate=0,
+    )
+    assert ["-p", "80", "10.0.0.1"] in [cmd[i : i + 3] for i in range(len(cmd) - 2)]
+    assert ["-p", "22,443", "10.0.0.2"] in [cmd[i : i + 3] for i in range(len(cmd) - 2)]
+    assert cmd[-1] == "/tmp/out/group_abc"
+
+
+def test_build_nmap_command_multi_host_ipv6():
+    cmd = _build_nmap_command(
+        {"2001:db8::1": ["80"]},
+        Path("/tmp/out/group_v6"),
+        scripts="default",
+        version_detection=False,
+        os_detection=False,
+        nmap_timing="T4",
+        per_process_rate=0,
+    )
+    assert "[2001:db8::1]" in cmd
 
 
 def test_build_nmap_command_omits_rate_when_unlimited():
     cmd = _build_nmap_command(
-        "10.0.0.1",
-        ["80"],
+        {"10.0.0.1": ["80"]},
         Path("/tmp/out/10.0.0.1"),
         scripts="default,safe",
         version_detection=False,
@@ -89,3 +124,28 @@ def test_build_nmap_command_omits_rate_when_unlimited():
     assert "--max-rate" not in cmd
     assert "-sV" not in cmd
     assert "-O" not in cmd
+
+
+def test_chunk_host_ports_groups_hosts():
+    host_ports = {
+        "10.0.0.1": ["80"],
+        "10.0.0.2": ["22"],
+        "10.0.0.3": ["443"],
+        "10.0.0.4": ["8080"],
+    }
+    groups = _chunk_host_ports(host_ports, 2)
+    assert len(groups) == 2
+    assert sum(len(group) for group in groups) == 4
+
+
+def test_chunk_host_ports_one_per_group_when_size_one():
+    host_ports = {"10.0.0.1": ["80"], "10.0.0.2": ["22"]}
+    groups = _chunk_host_ports(host_ports, 1)
+    assert groups == [{"10.0.0.1": ["80"]}, {"10.0.0.2": ["22"]}]
+
+
+def test_group_output_basename_single_vs_multi():
+    assert _group_output_basename(["10.0.0.1"]) == "10.0.0.1"
+    multi = _group_output_basename(["10.0.0.1", "10.0.0.2"])
+    assert multi.startswith("group_")
+    assert len(multi) == len("group_") + 12

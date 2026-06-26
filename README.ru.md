@@ -130,6 +130,8 @@ YAML проверяется при старте через **Pydantic** (`scanne
   батчей naabu на этапах discovery и port-scan (по умолчанию `4`). `1` — строго
   последовательно. Эффективный pps ≈ `rate × concurrency`.
 - `runtime.nse_concurrency` / `profiles.<name>.nse_concurrency` — число одновременно запускаемых процессов nmap. Увеличивайте под мощность хоста и допустимый сетевой шум.
+- `runtime.nse_hosts_per_scan` — число хостов в одном процессе nmap (по умолчанию `8`). Меньше
+  стартов nmap; checkpoint по-прежнему **по хостам**. `1` — один хост на процесс, как раньше.
 - `runtime.nse_max_rate` / `profiles.<name>.nse_max_rate` — глобальный бюджет пакетов/сек на этап NSE/OS. Делится между параллельными процессами nmap (каждый получает `nse_max_rate / nse_concurrency` через `nmap --max-rate`). `0` — без ограничения (полагаемся на тайминг-шаблон). Так совокупный шум скана остаётся ограниченным независимо от уровня параллелизма.
 - `runtime.nse_timeout_seconds` — таймаут nmap на один хост (отдельно от глобального `timeout_seconds`; максимум **600** с / 10 мин).
 - `nse_profiles.<name>.os_detection: true` включает `nmap -O --osscan-guess`. Требует raw-сокетов (`NET_RAW`/`NET_ADMIN`, уже выданы в `docker-compose.yml`).
