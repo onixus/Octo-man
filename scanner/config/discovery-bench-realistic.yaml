@@ -16,22 +16,22 @@ runtime:
 
 profiles:
   safe:
-    discover_rate: 800
-    port_rate: 2000
+    discover_rate: 1600
+    port_rate: 2500
     top_ports: 100
     nmap_timing: T4
     nse_profile: bench
     nse_concurrency: 4
   balanced:
-    discover_rate: 1500
-    port_rate: 3000
+    discover_rate: 3000
+    port_rate: 3750
     top_ports: 100
     nmap_timing: T4
     nse_profile: bench
     nse_concurrency: 4
   fast:
-    discover_rate: 2500
-    port_rate: 4000
+    discover_rate: 5000
+    port_rate: 5000
     top_ports: 100
     nmap_timing: T4
     nse_profile: bench
@@ -49,12 +49,12 @@ discovery:
   disjoint_batches: true
   adaptive:
     enabled: true
-    wave2_rate: 800
+    wave2_rate: 2500
     min_gap: 1
   exclude_last_octets: [1]
   verify:
     enabled: true
-    rate: 500
+    rate: 1250
 
 ports:
   source: naabu
