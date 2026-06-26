@@ -32,6 +32,7 @@ def run_command(
     timeout: int,
     retries: int,
     check: bool = True,
+    capture_output: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     last_exc: Exception | None = None
     for attempt in range(1, retries + 2):
@@ -40,14 +41,15 @@ def run_command(
             completed = subprocess.run(
                 command,
                 text=True,
-                capture_output=True,
+                capture_output=capture_output,
                 timeout=timeout,
                 check=check,
             )
-            if completed.stdout.strip():
-                logging.info("stdout: %s", completed.stdout.strip()[:1000])
-            if completed.stderr.strip():
-                logging.info("stderr: %s", completed.stderr.strip()[:1000])
+            if capture_output:
+                if completed.stdout and completed.stdout.strip():
+                    logging.info("stdout: %s", completed.stdout.strip()[:1000])
+                if completed.stderr and completed.stderr.strip():
+                    logging.info("stderr: %s", completed.stderr.strip()[:1000])
             return completed
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
