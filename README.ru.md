@@ -45,6 +45,17 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
   --resume --run-id 20260626T104530Z
 ```
 
+### 5) L1-скан, затем NSE отдельным прогоном
+
+Быстрый проход (discover + ports + отчёты без NSE), затем обогащение через `--resume`:
+
+```bash
+docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced --skip-nse
+docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced --resume
+```
+
+Или `runtime.skip_nse: true` в конфиге. Удобно для больших сетей: сначала живые хосты и порты, потом Nmap/NSE.
+
 ## Валидация конфигурации
 
 YAML проверяется при старте через **Pydantic** (`scanner/pipeline/config_schema.py`):
@@ -99,10 +110,14 @@ YAML проверяется при старте через **Pydantic** (`scanne
 
 1. **Нормализация целей**: валидация `CIDR/IP/FQDN`.
 2. **Resolve**: FQDN -> IP через `dnsx`.
-3. **Discovery**: определение живых хостов (побатчево).
-4. **Fast ports**: быстрый проход по `top-ports`/custom ports (побатчево).
-5. **NSE/Nmap**: углубление только для найденных открытых портов — определение версий сервисов, **версии ОС (`-O`)** и **уязвимостей (NSE-категория `vuln` + `vulners`/`vulscan` → CVE)**. Этап выполняется параллельно пулом процессов nmap.
-6. **Отчеты**: экспорт JSON/CSV + сводка, включая найденные ОС и потенциальные уязвимости.
+3. **Discovery (wave-1)**: определение живых хостов побатчево; при **disjoint** батчах — параллельно.
+4. **Discovery (wave-2, adaptive)**: догон пропущенных хостов в scope (если `discovery.adaptive.enabled`).
+5. **Fast ports**: быстрый проход по `top-ports`/custom ports (побатчево).
+6. **Verify (опционально)**: повторный ping живых хостов без открытых портов (`discovery.verify`).
+7. **NSE/Nmap** (можно отложить через `--skip-nse`): углубление по найденным `host:port` — версии сервисов, **ОС (`-O`)**, **CVE (`vuln`/`vulners`/`vulscan`)**. Параллельный пул nmap.
+8. **Отчёты**: JSON/CSV + сводка с ОС и уязвимостями.
+
+Двухфазный режим: `--skip-nse` → `--resume` (L1, затем enrichment).
 
 ## Батчинг и возобновление (resume)
 
@@ -120,11 +135,33 @@ YAML проверяется при старте через **Pydantic** (`scanne
   сетевой шум ≈ `rate × concurrency`.
 - Этап NSE/OS чекпойнтится **по хостам** — `--resume` пропускает уже отсканированные.
 - Прогресс — в `scanner/state/checkpoint.json` (флаги стадий + множества элементов:
-  id батчей `discover`/`ports`, хосты `nse`). Запись потокобезопасна и атомарна по элементу.
+  id батчей `discover` / `discover-wave2` / `ports`, хосты `nse`). Запись потокобезопасна и атомарна по элементу.
 
 Настройка/отключение — секция `batching:` в `scanner/config/default.yaml`
 (`enabled`, `ipv4_prefix`, `max_targets_per_batch`). Меньший `ipv4_prefix` — более
 дробный resume ценой большего числа запусков инструментов.
+
+## Настройка discovery
+
+Секция `discovery:` в конфиге:
+
+```yaml
+discovery:
+  skip_discovery: false       # true — считать входные IP живыми (load test)
+  skip_known_alive: true      # не сканировать уже найденные alive в следующих батчах
+  disjoint_batches: true      # параллельный discover, если батчи не пересекаются
+  adaptive:
+    enabled: true             # wave-2 — догон пропущенных хостов
+    min_gap: 1
+    wave2_rate: 800           # опционально; по умолчанию ≈ discover_rate / 4
+  exclude_alive: []
+  exclude_last_octets: []     # напр. [0, 255]
+  verify:
+    enabled: false            # повторный ping alive без открытых портов
+```
+
+**Disjoint** батчи (напр. `/22` → четыре `/24`) идут параллельно с `discover_concurrency`.
+Пересекающиеся батчи — последовательно с `skip_known_alive`.
 
 ## Протокол сканирования (TCP / UDP / TCP+UDP)
 
@@ -155,6 +192,7 @@ Checkpoint NSE: ключи `host/tcp` и `host/udp`. XML — в `nmap/tcp/` и `
   стартов nmap; checkpoint по-прежнему **по хостам**. `1` — один хост на процесс, как раньше.
 - `runtime.nse_max_rate` / `profiles.<name>.nse_max_rate` — глобальный бюджет пакетов/сек на этап NSE/OS. Делится между параллельными процессами nmap (каждый получает `nse_max_rate / nse_concurrency` через `nmap --max-rate`). `0` — без ограничения (полагаемся на тайминг-шаблон). Так совокупный шум скана остаётся ограниченным независимо от уровня параллелизма.
 - `runtime.nse_timeout_seconds` — таймаут nmap на один хост (отдельно от глобального `timeout_seconds`; максимум **600** с / 10 мин).
+- `runtime.skip_nse` / флаг `--skip-nse` — пропустить NSE (L1: discover + ports + отчёты); затем `--resume` для обогащения.
 - `nse_profiles.<name>.os_detection: true` включает `nmap -O --osscan-guess`. Требует raw-сокетов (`NET_RAW`/`NET_ADMIN`, уже выданы в `docker-compose.yml`).
 
 Артефакты по ОС и уязвимостям: `scanner/output/os_findings.json`, `scanner/output/script_findings.json`, `scanner/output/vulnerabilities.json`, `scanner/output/vulnerabilities.csv`.
@@ -196,16 +234,25 @@ Checkpoint NSE: ключи `host/tcp` и `host/udp`. XML — в `nmap/tcp/` и `
 ```bash
 docker build -t network-scan-cli:ci .
 tests/load/run.sh network-scan-cli:ci --hosts 16
-tests/load/run.sh network-scan-cli:ci --hosts 64 --config tests/load/config-heavy.yaml \
+tests/load/run.sh network-scan-cli:ci --hosts 32 --config tests/load/config-heavy.yaml \
   --run-id local-heavy --resume-test
 ```
 
-В CI на каждый PR — 16 мишеней (`tests/load/config.yaml`). Тяжёлый прогон (64+ хостов,
-checkpoint resume) — workflow `.github/workflows/load-test.yml` (вручную или по cron раз в неделю).
+В CI на каждый PR — 16 мишеней (`tests/load/config.yaml`). Тяжёлый прогон — workflow
+`.github/workflows/load-test.yml`: по умолчанию **32** хоста, `tests/load/config-heavy.yaml`.
+Ручной запуск — с `--resume-test`; еженедельный cron — без resume (полный скан).
+
+Переменные окружения для `tests/load/run.sh`: `CHECKPOINT_TIMEOUT_SEC`, `SCAN_TIMEOUT_SEC`,
+`KEEP_WORK=1` (отладка, не удалять temp-директорию).
+
+- **Бенчмарк discovery** (конфиги на master): `scanner/config/discovery-bench.yaml`,
+  `discovery-bench-realistic.yaml`; входы — `scanner/inputs/bench/`. Docker-лаборатория
+  (`bench/up.sh`, `bench/run-discovery.sh`) — в PR [#16](https://github.com/onixus/Octo-man/pull/16).
 
 - Модульные тесты чистых функций и парсеров (валидация входа, группировка портов,
-  разбор `host:port` с IPv6, деление rate-budget, сборка команды nmap, извлечение
-  сервисов/ОС/CVE с CVSS и severity из отчётов nmap):
+  разбор `host:port` с IPv6, режимы TCP/UDP, adaptive discovery и coverage tracker,
+  деление rate-budget, сборка команды nmap, извлечение сервисов/ОС/CVE с CVSS и severity,
+  валидация схемы конфига, per-run каталоги, проверка load-test результатов):
 
 ```bash
 pip install -r requirements-dev.txt
