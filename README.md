@@ -16,6 +16,9 @@ Reproducible CLI pipeline for scanning large networks:
 - Speed profiles: `safe`, `balanced`, `fast`.
 - DNS resolve for FQDN via `dnsx`.
 - Host discovery and fast port scan via `naabu` (TCP, UDP, or both).
+- **Adaptive discovery**: wave-1 batched sweep plus optional wave-2 gap fill for missed hosts.
+- **Disjoint-batch parallelism**: non-overlapping CIDR batches run discover in parallel; overlapping batches stay sequential with `skip_known_alive`.
+- **Deferred NSE** (`runtime.skip_nse` / `--skip-nse`): L1 run (discover + ports + reports), then `--resume` for enrichment.
 - Enrichment with Nmap `-sV`, OS detection (`-O`) and NSE profiles (incl. `vuln`).
 - Parallel NSE/OS stage (configurable `nse_concurrency`) for faster large scans.
 - Parallel discovery/port batches (`discover_concurrency`, `ports_concurrency`) for faster naabu stages.
@@ -27,12 +30,14 @@ Reproducible CLI pipeline for scanning large networks:
 
 - `Dockerfile`
 - `docker-compose.yml`
-- `scanner/config/default.yaml`
-- `scanner/inputs/{ranges.txt,domains.txt,ports.txt}`
+- `scanner/config/default.yaml` (+ optional `discovery-bench*.yaml` for discovery tuning)
+- `scanner/inputs/{ranges.txt,domains.txt,ports.txt,ports_udp.txt}`
 - `scanner/main.py`
 - `scanner/pipeline/*`
+- `tests/{e2e,load}/` — CI integration tests
+- `scripts/{smoke.sh,load-test.sh}` — local helpers
 - `scanner/output/*` (generated)
-- `scanner/state/checkpoint.json` (generated)
+- `scanner/state/checkpoint.json` (generated; per-run under `scanner/state/runs/<run_id>/`)
 
 ## Input Contract
 
@@ -100,6 +105,17 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
   --resume --run-id 20260626T104530Z
 ```
 
+### 5) L1 scan, then enrich with NSE later
+
+Run discovery + port scan + reports only (skip NSE), then resume for Nmap/NSE:
+
+```bash
+docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced --skip-nse
+docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced --resume
+```
+
+Or set `runtime.skip_nse: true` in the config. Useful for large networks: get alive hosts and open ports quickly, enrich in a second pass.
+
 ## Configuration validation
 
 The YAML config is validated at startup with **Pydantic** (`scanner/pipeline/config_schema.py`).
@@ -152,9 +168,10 @@ on smaller hosts.
 ## Tests
 
 Unit tests cover the pure helpers and parsers: input validation, port grouping,
-custom port parsing, IPv6 `host:port` handling, NSE rate-budget split, the nmap
-command builder, report extraction (services, OS matches, CVE/CVSS + severity ranking),
-config schema validation, and per-run directory resolution.
+custom port parsing, IPv6 `host:port` handling, TCP/UDP protocol modes, adaptive
+discovery and coverage tracking, NSE rate-budget split, the nmap command builder,
+report extraction (services, OS matches, CVE/CVSS + severity ranking), config schema
+validation, per-run directory resolution, and load-test result checks.
 
 ```bash
 pip install -r requirements-dev.txt
@@ -194,8 +211,17 @@ and records duration / peak RSS metrics.
 
 **CI (every PR):** 16 targets, config `tests/load/config.yaml`.
 
-**Heavy (manual / weekly):** workflow `.github/workflows/load-test.yml` — default 64 targets,
-`tests/load/config-heavy.yaml`, per-run dirs, optional mid-scan interrupt + `--resume`.
+**Heavy (manual / weekly):** workflow `.github/workflows/load-test.yml` — default **32** targets,
+`tests/load/config-heavy.yaml`, per-run dirs, optional mid-scan interrupt + `--resume` on manual
+dispatch (scheduled weekly run skips resume).
+
+Environment overrides for `tests/load/run.sh`:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CHECKPOINT_TIMEOUT_SEC` | `120` | Max wait for resume checkpoint (heavy workflow sets this) |
+| `SCAN_TIMEOUT_SEC` | `2400` | Hard timeout on scanner container (heavy: `1800`) |
+| `KEEP_WORK=1` | off | Keep temp workdir on exit (debug) |
 
 Run locally:
 
@@ -207,6 +233,18 @@ tests/load/run.sh network-scan-cli:ci --hosts 32 --config tests/load/config-heav
 ```
 
 For a **real-network** load run against your own CIDR (outside CI), use `scripts/load-test.sh <cidr>`.
+
+### Local discovery benchmark (configs)
+
+Tuned discovery configs for throughput experiments:
+
+- `scanner/config/discovery-bench.yaml` — fast discovery profile, minimal NSE
+- `scanner/config/discovery-bench-realistic.yaml` — adaptive wave-2 + verify, closer to production
+
+Point `--ranges` / `--domains` at your targets (sample inputs under `scanner/inputs/bench/`).
+An optional docker lab harness (`bench/up.sh`, `bench/run-discovery.sh`) is provided in PR
+[#16](https://github.com/onixus/Octo-man/pull/16) to emulate a private network with nginx targets
+and emit JSON metrics (`hostname`, `cpu_count`, `mem_total_mb`, etc.).
 
 ### Image scanning & SBOM
 
@@ -301,6 +339,33 @@ Scripts reporting `State: VULNERABLE` without a CVE are also captured (severity 
 
 Tune profile parameters in `scanner/config/default.yaml`.
 
+### Discovery tuning
+
+Under `discovery:` in the config:
+
+```yaml
+discovery:
+  skip_discovery: false       # true = treat input IPs as alive (synthetic/load tests)
+  skip_known_alive: true      # skip IPs already found in earlier discover batches
+  disjoint_batches: true      # parallel discover when batches do not overlap
+  adaptive:
+    enabled: true             # wave-2 gap fill after wave-1
+    min_gap: 1                # minimum gap hosts before wave-2 runs
+    wave2_rate: 800           # optional; default ≈ discover_rate / 4
+    max_gap_hosts: 65536
+  exclude_alive: []           # CIDRs/IPs never marked alive
+  exclude_last_octets: []     # e.g. [0, 255]
+  verify:
+    enabled: false            # re-probe alive hosts with no open ports
+    rate: 750                 # optional verify rate
+```
+
+Wave-1 splits targets via `batching:` (same rules as ports). When batches are **disjoint**
+(e.g. `/22` → four `/24`s), discovery runs with `discover_concurrency` in parallel. Overlapping
+batches force sequential discover with `skip_known_alive` to avoid duplicate probes. Adaptive
+wave-2 rescans hosts in the scope that wave-1 missed. Checkpoints: `discover` and `discover-wave2`
+batch ids.
+
 ### Scan protocol (TCP / UDP / TCP+UDP)
 
 Under `ports:` in the config:
@@ -332,6 +397,7 @@ NSE checkpoint keys use `host/tcp` and `host/udp`. Nmap XML lives under `nmap/tc
   behavior. Effective pps ≈ `rate × concurrency`.
 - `runtime.nse_max_rate` / `profiles.<name>.nse_max_rate`: global packets/sec budget for the NSE/OS stage. It is split across the parallel nmap processes (each gets `nse_max_rate / nse_concurrency` via `nmap --max-rate`). `0` means unlimited (rely on the timing template). This keeps aggregate scan noise bounded regardless of concurrency.
 - `runtime.nse_timeout_seconds`: per-host nmap timeout (independent of the global command timeout; max **600** s / 10 min).
+- `runtime.skip_nse`: skip the NSE stage (L1 scan). Combine with `--resume` for a two-phase workflow.
 
 OS detection and SYN/ICMP probing require raw sockets. The container is granted
 `NET_RAW`/`NET_ADMIN` via `docker-compose.yml`; outside compose run with equivalent capabilities.
@@ -353,8 +419,8 @@ whole scan, and `--resume` only redoes what's left.
 - The NSE/OS stage is checkpointed **per host** — `--resume` skips hosts whose
   scan already completed.
 - Progress is tracked in `scanner/state/checkpoint.json` with stage flags and
-  per-item sets (`discover`/`ports` batch ids, `nse` hosts). Writes are atomic
-  per item and thread-safe.
+  per-item sets (`discover` / `discover-wave2` / `ports` batch ids, `nse` hosts).
+  Writes are atomic per item and thread-safe.
 
 Tune or disable batching under `batching:` in `scanner/config/default.yaml`
 (`enabled`, `ipv4_prefix`, `max_targets_per_batch`). Smaller `ipv4_prefix` means
