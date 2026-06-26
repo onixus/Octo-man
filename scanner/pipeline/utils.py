@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import re
 import shlex
 import subprocess
@@ -11,12 +12,19 @@ from pathlib import Path
 from typing import Any
 
 
-def setup_logging(log_file: Path) -> None:
+def setup_logging(log_file: Path, max_bytes: int = 10_485_760, backup_count: int = 5) -> None:
     log_file.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    stream_handler = logging.StreamHandler()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
+        handlers=[file_handler, stream_handler],
     )
 
 
