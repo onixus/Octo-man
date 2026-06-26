@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from scanner.pipeline.nse import _group_ports_by_host, _parse_host_port, _safe_filename
+from pathlib import Path
+
+from scanner.pipeline.nse import (
+    _build_nmap_command,
+    _group_ports_by_host,
+    _parse_host_port,
+    _per_process_rate,
+    _safe_filename,
+)
 
 
 def test_group_ports_by_host_groups_and_sorts():
@@ -40,3 +48,44 @@ def test_group_ports_by_host_handles_ipv6():
 
 def test_safe_filename_replaces_separators():
     assert _safe_filename("2001:db8::1") == "2001_db8__1"
+
+
+def test_per_process_rate_splits_budget():
+    assert _per_process_rate(2000, 4) == 500
+    assert _per_process_rate(0, 4) == 0  # unlimited
+    assert _per_process_rate(3, 8) == 1  # never drops below 1 when budget set
+    assert _per_process_rate(1000, 0) == 1000  # guards against zero workers
+
+
+def test_build_nmap_command_includes_os_and_rate():
+    cmd = _build_nmap_command(
+        "10.0.0.1",
+        ["80", "443"],
+        Path("/tmp/out/10.0.0.1"),
+        scripts="default,safe,vuln",
+        version_detection=True,
+        os_detection=True,
+        nmap_timing="T4",
+        per_process_rate=500,
+    )
+    assert "-sV" in cmd
+    assert "-O" in cmd and "--osscan-guess" in cmd
+    assert cmd[cmd.index("--max-rate") + 1] == "500"
+    assert cmd[cmd.index("-p") + 1] == "80,443"
+    assert cmd[-1] == "10.0.0.1"
+
+
+def test_build_nmap_command_omits_rate_when_unlimited():
+    cmd = _build_nmap_command(
+        "10.0.0.1",
+        ["80"],
+        Path("/tmp/out/10.0.0.1"),
+        scripts="default,safe",
+        version_detection=False,
+        os_detection=False,
+        nmap_timing="T3",
+        per_process_rate=0,
+    )
+    assert "--max-rate" not in cmd
+    assert "-sV" not in cmd
+    assert "-O" not in cmd
