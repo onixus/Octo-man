@@ -54,7 +54,14 @@ nse_profiles:
     version_detection: true
     os_detection: true
   vuln:
-    scripts: "default,safe,vuln"
+    # Nmap "vuln" category + vulners CVE lookup by service version.
+    # vulners queries the vulners.com API and needs outbound internet access.
+    scripts: "default,safe,vuln,vulners"
+    version_detection: true
+    os_detection: true
+  vuln-offline:
+    # Fully offline CVE matching via vulscan's bundled local databases.
+    scripts: "default,safe,vuln,vulscan/vulscan.nse"
     version_detection: true
     os_detection: true
   service_specific:
