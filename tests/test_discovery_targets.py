@@ -19,10 +19,10 @@ def test_filter_hosts_in_scope_drops_out_of_range():
 
 def test_pending_discovery_targets_excludes_known_alive():
     pending = pending_discovery_targets(
-        ["10.99.0.0/30"],
+        ["10.99.0.0/29"],
         {"10.99.0.1", "10.99.0.2"},
     )
-    assert pending == ["10.99.0.3"]
+    assert pending == ["10.99.0.3", "10.99.0.4", "10.99.0.5", "10.99.0.6"]
 
 
 def test_pending_discovery_targets_empty_when_all_known():

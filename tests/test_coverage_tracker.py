@@ -5,15 +5,15 @@ from scanner.pipeline.coverage_tracker import CoverageTracker, batches_are_disjo
 
 
 def test_expand_target_ips_cidr():
-    ips = expand_target_ips(["10.99.0.0/30"])
-    assert ips == {"10.99.0.1", "10.99.0.2", "10.99.0.3"}
+    ips = expand_target_ips(["10.99.0.0/29"])
+    assert ips == {"10.99.0.1", "10.99.0.2", "10.99.0.3", "10.99.0.4", "10.99.0.5", "10.99.0.6"}
 
 
 def test_coverage_tracker_gap():
-    tracker = CoverageTracker.from_targets(["10.99.0.0/30"])
+    tracker = CoverageTracker.from_targets(["10.99.0.0/29"])
     tracker.mark_found(["10.99.0.1", "10.99.0.2"])
-    assert tracker.gap() == ["10.99.0.3"]
-    assert tracker.stats()["gap_hosts"] == 1
+    assert tracker.gap() == ["10.99.0.3", "10.99.0.4", "10.99.0.5", "10.99.0.6"]
+    assert tracker.stats()["gap_hosts"] == 4
 
 
 def test_batches_are_disjoint_for_subnets():

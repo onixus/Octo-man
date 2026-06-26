@@ -27,7 +27,11 @@ def filter_alive_hosts(
     for host in hosts:
         if host in literal_excludes:
             continue
-        if any(host in net for net in excluded_networks):
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            ip = None
+        if ip is not None and any(ip in net for net in excluded_networks):
             continue
         if last_octets and is_ipv4_last_octet(host, last_octets):
             continue

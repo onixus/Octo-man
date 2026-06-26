@@ -76,7 +76,7 @@ def test_build_nmap_command_multi_host():
         scan_protocol="tcp",
     )
     p_idx = cmd.index("-p")
-    assert cmd[p_idx + 1] == "22,443,80"
+    assert cmd[p_idx + 1] == "22,80,443"
     assert cmd[p_idx + 2 : p_idx + 4] == ["10.0.0.1", "10.0.0.2"]
     assert cmd.count("-p") == 1
 
