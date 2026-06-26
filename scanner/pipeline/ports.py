@@ -49,7 +49,7 @@ def fast_port_scan(
     ]
     custom_ports = _flatten_custom_ports(custom_ports_file)
     if custom_ports:
-        command.extend(["-ports", custom_ports])
+        command.extend(["-p", custom_ports])
     else:
         command.extend(["-top-ports", str(top_ports)])
 
