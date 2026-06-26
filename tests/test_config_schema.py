@@ -71,9 +71,17 @@ def test_load_config_rejects_invalid_ipv4_prefix():
         load_config(raw)
 
 
+def test_load_config_rejects_nse_timeout_above_ten_minutes():
+    raw = _minimal_config()
+    raw["runtime"] = {"nse_timeout_seconds": 601}
+    with pytest.raises(ValidationError):
+        load_config(raw)
+
+
 def test_default_yaml_parses():
     import yaml
 
     text = Path("scanner/config/default.yaml").read_text(encoding="utf-8")
     cfg = AppConfig.model_validate(yaml.safe_load(text))
     assert cfg.runtime.per_run_output is True
+    assert cfg.runtime.nse_timeout_seconds == 600

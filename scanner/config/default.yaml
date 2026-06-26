@@ -5,8 +5,8 @@ runtime:
   logs_dir: scanner/output/logs
   retries: 2
   timeout_seconds: 1800
-  # Per-host nmap (NSE/OS) timeout, separate from the global command timeout.
-  nse_timeout_seconds: 900
+  # Per-host nmap (NSE/OS) timeout, separate from the global command timeout (max 600 s).
+  nse_timeout_seconds: 600
   # Default number of nmap processes run in parallel during the NSE/OS stage.
   nse_concurrency: 4
   # Global packets/sec budget for the NSE/OS stage, shared across all parallel
