@@ -1,5 +1,7 @@
 # Network Scan CLI (Containerized)
 
+[![CI](https://github.com/onixus/Octo-man/actions/workflows/ci.yml/badge.svg)](https://github.com/onixus/Octo-man/actions/workflows/ci.yml)
+
 English is the primary documentation language.  
 For a Russian version with extra operational recommendations, see [README.ru.md](README.ru.md).
 
@@ -100,7 +102,16 @@ Unit tests cover the pure helpers (input validation, port grouping, custom port 
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q
+ruff check scanner tests
 ```
+
+## Continuous Integration
+
+`.github/workflows/ci.yml` runs on every push to `master` and on pull requests:
+
+- **lint**: `ruff check`.
+- **test**: `compileall` + `pytest` on Python 3.11 and 3.12.
+- **docker-build**: builds the image and smoke-checks the toolchain (`naabu`, `dnsx`, `nmap`, `nmap-vulners`/`vulscan` scripts).
 
 ## Profiles
 
