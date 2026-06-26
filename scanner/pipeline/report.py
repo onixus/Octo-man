@@ -9,32 +9,71 @@ from pathlib import Path
 from .utils import save_json
 
 
-def _collect_nmap_services(nmap_dir: Path) -> list[dict]:
-    findings: list[dict] = []
+def _host_address(host: ET.Element) -> str:
+    for address in host.findall("address"):
+        if address.attrib.get("addrtype") in ("ipv4", "ipv6"):
+            return address.attrib.get("addr", "unknown")
+    address_node = host.find("address")
+    return address_node.attrib.get("addr", "unknown") if address_node is not None else "unknown"
+
+
+def _parse_nmap_xml(nmap_dir: Path) -> tuple[list[dict], list[dict], list[dict]]:
+    """Return (services, os_matches, script_findings) parsed from Nmap XML files."""
+    services: list[dict] = []
+    os_matches: list[dict] = []
+    script_findings: list[dict] = []
+
     for xml_file in sorted(nmap_dir.glob("*.xml")):
         try:
             root = ET.fromstring(xml_file.read_text(encoding="utf-8"))
         except ET.ParseError:
             continue
         for host in root.findall("host"):
-            address_node = host.find("address")
-            address = address_node.attrib.get("addr", "unknown") if address_node is not None else "unknown"
-            for port in host.findall("./ports/port"):
-                state = port.find("state")
-                service = port.find("service")
-                if state is None or state.attrib.get("state") != "open":
-                    continue
-                findings.append(
+            address = _host_address(host)
+
+            for osmatch in host.findall("./os/osmatch"):
+                os_matches.append(
                     {
                         "host": address,
-                        "port": port.attrib.get("portid", ""),
+                        "name": osmatch.attrib.get("name", ""),
+                        "accuracy": osmatch.attrib.get("accuracy", ""),
+                    }
+                )
+
+            for script in host.findall("./hostscript/script"):
+                script_findings.append(_script_record(address, "", script))
+
+            for port in host.findall("./ports/port"):
+                state = port.find("state")
+                if state is None or state.attrib.get("state") != "open":
+                    continue
+                service = port.find("service")
+                portid = port.attrib.get("portid", "")
+                services.append(
+                    {
+                        "host": address,
+                        "port": portid,
                         "protocol": port.attrib.get("protocol", ""),
                         "service": (service.attrib.get("name", "unknown") if service is not None else "unknown"),
                         "product": (service.attrib.get("product", "") if service is not None else ""),
                         "version": (service.attrib.get("version", "") if service is not None else ""),
                     }
                 )
-    return findings
+                for script in port.findall("script"):
+                    script_findings.append(_script_record(address, portid, script))
+
+    return services, os_matches, script_findings
+
+
+def _script_record(host: str, port: str, script: ET.Element) -> dict:
+    output = (script.attrib.get("output", "") or "").strip()
+    return {
+        "host": host,
+        "port": port,
+        "script_id": script.attrib.get("id", ""),
+        "output": output,
+        "vulnerable": "VULNERABLE" in output.upper(),
+    }
 
 
 def build_reports(
@@ -48,17 +87,33 @@ def build_reports(
     csv_export: bool,
     json_export: bool,
 ) -> None:
-    findings = _collect_nmap_services(nmap_dir)
+    findings, os_matches, script_findings = _parse_nmap_xml(nmap_dir)
     service_counter = Counter(item["service"] for item in findings)
+    vulnerabilities = [item for item in script_findings if item["vulnerable"]]
+
+    best_os_by_host: dict[str, dict] = {}
+    for match in os_matches:
+        host = match["host"]
+        current = best_os_by_host.get(host)
+        if current is None or int(match["accuracy"] or 0) > int(current["accuracy"] or 0):
+            best_os_by_host[host] = match
 
     summary = {
         "total_targets": total_targets,
         "alive_hosts": len(alive_hosts),
         "open_host_port_pairs": len(open_ports),
         "nmap_open_services": len(findings),
+        "os_detected_hosts": len(best_os_by_host),
+        "nse_script_findings": len(script_findings),
+        "potential_vulnerabilities": len(vulnerabilities),
         "top_services": service_counter.most_common(15),
     }
     save_json(output_dir / "summary.json", summary)
+
+    # OS and NSE/vuln findings are core deliverables and always exported.
+    save_json(output_dir / "os_findings.json", os_matches)
+    save_json(output_dir / "script_findings.json", script_findings)
+    save_json(output_dir / "vulnerabilities.json", vulnerabilities)
 
     if json_export:
         save_json(output_dir / "findings.json", findings)
@@ -82,11 +137,30 @@ def build_reports(
             f"- Alive hosts: {summary['alive_hosts']}",
             f"- Open host:port pairs: {summary['open_host_port_pairs']}",
             f"- Parsed open services from Nmap XML: {summary['nmap_open_services']}",
+            f"- Hosts with OS detected: {summary['os_detected_hosts']}",
+            f"- NSE script findings: {summary['nse_script_findings']}",
+            f"- Potential vulnerabilities: {summary['potential_vulnerabilities']}",
             "",
             "## Top Services",
         ]
         for service, count in summary["top_services"]:
             md_lines.append(f"- {service}: {count}")
+
+        md_lines += ["", "## Operating Systems"]
+        if best_os_by_host:
+            for host, match in sorted(best_os_by_host.items()):
+                md_lines.append(f"- {host}: {match['name']} (accuracy {match['accuracy']}%)")
+        else:
+            md_lines.append("- none detected")
+
+        md_lines += ["", "## Potential Vulnerabilities"]
+        if vulnerabilities:
+            for item in vulnerabilities:
+                location = f"{item['host']}:{item['port']}" if item["port"] else item["host"]
+                md_lines.append(f"- {location} [{item['script_id']}]")
+        else:
+            md_lines.append("- none detected")
+
         (output_dir / "summary.md").write_text("\n".join(md_lines) + "\n", encoding="utf-8")
 
     if html_summary:
