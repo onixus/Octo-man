@@ -69,8 +69,9 @@ def _build_nmap_command(
     if per_process_rate > 0:
         command += ["--max-rate", str(per_process_rate)]
     command += ["--script", scripts]
-    for host, ports in sorted(host_ports.items()):
-        command += ["-p", ",".join(ports), _format_nmap_host(host)]
+    all_ports = sorted({port for ports in host_ports.values() for port in ports}, key=int)
+    command += ["-p", ",".join(all_ports)]
+    command += [_format_nmap_host(host) for host in sorted(host_ports)]
     command += ["-oA", str(base)]
     return command
 

@@ -17,6 +17,8 @@ runtime:
   # Parallel naabu batches for discovery and port scan (each batch is independent).
   discover_concurrency: 4
   ports_concurrency: 4
+  # Set true or pass --skip-nse for L1-only runs (discover + ports). Re-run with --resume for NSE.
+  skip_nse: false
   keep_intermediate: true
   # Each run writes to output_dir/runs/<run_id>/ and state_dir/runs/<run_id>/.
   per_run_output: true
@@ -64,6 +66,15 @@ batching:
 discovery:
   source: naabu
   skip_discovery: false
+  skip_known_alive: true
+  disjoint_batches: true
+  adaptive:
+    enabled: true
+    min_gap: 1
+  exclude_alive: []
+  exclude_last_octets: []
+  verify:
+    enabled: false
 
 ports:
   source: naabu

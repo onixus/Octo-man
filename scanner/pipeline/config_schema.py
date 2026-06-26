@@ -18,6 +18,8 @@ class RuntimeConfig(BaseModel):
     nse_hosts_per_scan: int = Field(default=1, ge=1, le=256)
     discover_concurrency: int = Field(default=1, ge=1, le=32)
     ports_concurrency: int = Field(default=1, ge=1, le=32)
+    # Skip NSE stage (L1 scan: discover + ports + reports only). Re-run with --resume to enrich.
+    skip_nse: bool = False
     keep_intermediate: bool = True
     per_run_output: bool = True
     log_max_bytes: int = Field(default=10_485_760, ge=1024)  # 10 MiB
@@ -46,9 +48,29 @@ class BatchingConfig(BaseModel):
     max_targets_per_batch: int = Field(default=4096, ge=1, le=1_000_000)
 
 
+class AdaptiveDiscoveryConfig(BaseModel):
+    enabled: bool = False
+    wave2_rate: int | None = Field(default=None, ge=1, le=100_000)
+    min_gap: int = Field(default=1, ge=0, le=1_000_000)
+    max_gap_hosts: int = Field(default=65536, ge=1, le=1_000_000)
+
+
+class VerifyDiscoveryConfig(BaseModel):
+    enabled: bool = False
+    rate: int | None = Field(default=None, ge=1, le=100_000)
+
+
 class DiscoveryConfig(BaseModel):
     source: Literal["naabu"] = "naabu"
     skip_discovery: bool = False
+    # Skip hosts already found alive in earlier discover batches (overlapping batches only).
+    skip_known_alive: bool = True
+    # Parallel discover when batches do not share IPs (e.g. /22 split into /24).
+    disjoint_batches: bool = True
+    adaptive: AdaptiveDiscoveryConfig = Field(default_factory=AdaptiveDiscoveryConfig)
+    exclude_alive: list[str] = Field(default_factory=list)
+    exclude_last_octets: list[int] = Field(default_factory=list)
+    verify: VerifyDiscoveryConfig = Field(default_factory=VerifyDiscoveryConfig)
 
 
 class PortsConfig(BaseModel):

@@ -92,6 +92,38 @@ def test_load_config_rejects_invalid_port_protocol():
         load_config(raw)
 
 
+def test_discovery_bench_yaml_parses():
+    import yaml
+
+    text = Path("scanner/config/discovery-bench.yaml").read_text(encoding="utf-8")
+    cfg = AppConfig.model_validate(yaml.safe_load(text))
+    assert cfg.runtime.discover_concurrency == 8
+    assert cfg.discovery.skip_discovery is False
+    assert cfg.profiles["balanced"].discover_rate == 3000
+
+
+def test_discovery_bench_realistic_yaml_parses():
+    import yaml
+
+    text = Path("scanner/config/discovery-bench-realistic.yaml").read_text(encoding="utf-8")
+    cfg = AppConfig.model_validate(yaml.safe_load(text))
+    assert cfg.runtime.discover_concurrency == 2
+    assert cfg.profiles["balanced"].discover_rate == 1500
+    assert cfg.batching.max_targets_per_batch == 128
+    assert cfg.discovery.adaptive.enabled is True
+    assert cfg.discovery.verify.enabled is True
+
+
+def test_default_yaml_adaptive_discovery():
+    import yaml
+
+    text = Path("scanner/config/default.yaml").read_text(encoding="utf-8")
+    cfg = AppConfig.model_validate(yaml.safe_load(text))
+    assert cfg.discovery.adaptive.enabled is True
+    assert cfg.discovery.disjoint_batches is True
+    assert cfg.runtime.skip_nse is False
+
+
 def test_default_yaml_parses():
     import yaml
 
