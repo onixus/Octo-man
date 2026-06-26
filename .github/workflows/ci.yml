@@ -46,8 +46,8 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
-  docker-build:
-    name: Docker build
+  image:
+    name: Image (build, smoke, e2e, scan, SBOM)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,6 +59,8 @@ jobs:
           push: false
           load: true
           tags: network-scan-cli:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Smoke-check toolchain in image
         run: |
           docker run --rm --entrypoint sh network-scan-cli:ci -c '
@@ -70,3 +72,32 @@ jobs:
             test -f /usr/share/nmap/scripts/vulscan/vulscan.nse
             python -m compileall scanner
           '
+      - name: End-to-end scan against a target container
+        run: bash tests/e2e/run.sh network-scan-cli:ci
+      - name: Trivy report (non-blocking, all severities)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: network-scan-cli:ci
+          format: table
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: "0"
+      - name: Trivy gate (fail on fixable CRITICAL)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: network-scan-cli:ci
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Generate SBOM (SPDX JSON)
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          image: network-scan-cli:ci
+          format: spdx-json
+          output-file: sbom.spdx.json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: sbom
+          path: sbom.spdx.json
+          if-no-files-found: error
