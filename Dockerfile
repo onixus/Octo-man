@@ -27,8 +27,8 @@ RUN set -eux; \
     curl -fsSL "https://github.com/projectdiscovery/dnsx/releases/download/v${DNSX_VERSION}/dnsx_${DNSX_VERSION}_linux_${GOARCH}.zip" -o /tmp/dnsx.zip; \
     curl -fsSL "https://github.com/projectdiscovery/naabu/releases/download/v${NAABU_VERSION}/naabu_${NAABU_VERSION}_linux_${GOARCH}.zip" -o /tmp/naabu.zip; \
     apt-get update && apt-get install -y --no-install-recommends unzip; \
-    unzip -q /tmp/dnsx.zip -d /usr/local/bin; \
-    unzip -q /tmp/naabu.zip -d /usr/local/bin; \
+    unzip -q -o /tmp/dnsx.zip dnsx -d /usr/local/bin; \
+    unzip -q -o /tmp/naabu.zip naabu -d /usr/local/bin; \
     chmod +x /usr/local/bin/dnsx /usr/local/bin/naabu; \
     rm -f /tmp/dnsx.zip /tmp/naabu.zip; \
     apt-get purge -y unzip && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
