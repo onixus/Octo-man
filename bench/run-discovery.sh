@@ -15,6 +15,8 @@ RUN_ID="bench-$(date -u +%Y%m%dT%H%M%SZ)"
 LOG_DIR="${ROOT_DIR}/scanner/output/bench/logs"
 METRICS_FILE="${ROOT_DIR}/scanner/output/bench/${RUN_ID}-metrics.json"
 
+BENCH_ALIVE_REQUESTED="${1:-${BENCH_ALIVE_HOSTS}}"
+
 mkdir -p "${LOG_DIR}" "${ROOT_DIR}/scanner/state/bench"
 # Scanner container runs as uid 1000; sudo bench runs may leave root-owned dirs.
 if [[ -O "${ROOT_DIR}/scanner/output" ]] || [[ "$(id -u)" -eq 0 ]]; then
@@ -73,9 +75,23 @@ ALIVE_FILE="${OUTPUT_DIR}/alive_ips.txt"
 OPEN_FILE="${OUTPUT_DIR}/open_ports.txt"
 PIPE_LOG="${OUTPUT_DIR}/logs/pipeline.log"
 
+export BENCH_METRICS_MODE="${BENCH_MODE}"
+export BENCH_METRICS_ALIVE="${BENCH_ALIVE_REQUESTED}"
+
 python3 - "${METRICS_FILE}" "${RUN_ID}" "${DURATION}" "${SCAN_RC}" "${TARGET_LINES}" "${ALIVE_FILE}" "${OPEN_FILE}" "${PIPE_LOG}" <<'PY'
-import json, re, sys
+import json, os, re, socket, sys
 from pathlib import Path
+
+
+def mem_total_mb() -> int | None:
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) // 1024
+    except OSError:
+        return None
+    return None
+
 
 metrics_path = Path(sys.argv[1])
 run_id, duration, rc = sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
@@ -86,8 +102,12 @@ alive = len(alive_file.read_text(encoding="utf-8").splitlines()) if alive_file.e
 open_ports = len(open_file.read_text(encoding="utf-8").splitlines()) if open_file.exists() else 0
 
 discover_sec = None
+scan_mode = None
 if pipe_log.exists():
     text = pipe_log.read_text(encoding="utf-8", errors="replace")
+    mode_match = re.search(r"Starting scan pipeline in '(\w+)' mode", text)
+    if mode_match:
+        scan_mode = mode_match.group(1)
     starts = [m.group(1) for m in re.finditer(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ INFO discover:", text, re.M)]
     ends = [m.group(1) for m in re.finditer(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ INFO ports:", text, re.M)]
     if starts and ends:
@@ -98,6 +118,11 @@ if pipe_log.exists():
 
 payload = {
     "run_id": run_id,
+    "hostname": socket.gethostname(),
+    "cpu_count": os.cpu_count(),
+    "mem_total_mb": mem_total_mb(),
+    "scan_mode": scan_mode or os.environ.get("BENCH_METRICS_MODE"),
+    "alive_containers": int(os.environ.get("BENCH_METRICS_ALIVE", "0") or 0),
     "duration_sec": duration,
     "exit_code": rc,
     "target_count": target_lines,
