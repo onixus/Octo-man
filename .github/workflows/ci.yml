@@ -75,14 +75,14 @@ jobs:
       - name: End-to-end scan against a target container
         run: bash tests/e2e/run.sh network-scan-cli:ci
       - name: Trivy report (non-blocking, all severities)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: network-scan-cli:ci
           format: table
           severity: CRITICAL,HIGH,MEDIUM
           exit-code: "0"
       - name: Trivy gate (fail on fixable CRITICAL)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: network-scan-cli:ci
           format: table
