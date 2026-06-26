@@ -171,3 +171,55 @@ OS detection and SYN/ICMP probing require raw sockets. The container is granted
 - Prefer running from a Linux host/network where raw scanning is allowed.
 - High-rate profiles can trigger IDS/IPS and impact network stability.
 - If `docker compose build` fails with Docker socket errors, start Docker daemon/Desktop first.
+
+## Licenses
+
+This project's own source code (the `scanner/` package, `scripts/`, configs and docs)
+has **no license declared yet**. Until a license is added, default copyright applies and
+others have no redistribution rights — add a license (e.g. `MIT` or `Apache-2.0`) at the
+repository root before publishing.
+
+The container image **bundles third-party tools**, each under its own license. The Python
+code only invokes them as separate executables / NSE scripts ("mere aggregation"), so it is
+not a derivative work of them. However, **redistributing the built Docker image** must comply
+with every license below.
+
+### Runtime tools (bundled in the image)
+
+| Component | Pinned version | License | Notes |
+|---|---|---|---|
+| Nmap | Debian package | Nmap Public Source License (NPSL) v0.95 | GPLv2-derived custom license with restrictions on certain commercial/OEM redistribution — see <https://nmap.org/npsl/> |
+| naabu | `2.6.1` | MIT | ProjectDiscovery |
+| dnsx | `1.2.3` | MIT | ProjectDiscovery |
+| nmap-vulners | `NMAP_VULNERS_REF` | GPL-3.0 | NSE CVE-lookup script |
+| vulscan | `VULSCAN_REF` | GPL-3.0 | NSE script + local CVE databases |
+
+### Base image & OS packages (`python:3.12-slim`, Debian)
+
+| Component | License |
+|---|---|
+| Python (CPython) | PSF License Agreement |
+| ca-certificates (Mozilla CA bundle) | MPL-2.0 |
+| curl | curl license (MIT/X11-style) |
+| git | GPL-2.0 |
+| jq | MIT |
+| unzip (build-time only, removed from final image) | Info-ZIP License |
+
+### Python dependencies
+
+| Package | License | Scope |
+|---|---|---|
+| PyYAML | MIT | runtime |
+| pytest | MIT | dev/test |
+| ruff | MIT | dev/lint |
+
+### Compliance notes
+
+- The image ships **GPL-3.0** components (`nmap-vulners`, `vulscan`) and **NPSL**-licensed Nmap.
+  When distributing the image, provide the corresponding source or a written offer as required
+  by the GPL, and observe NPSL terms (notably commercial/OEM redistribution restrictions; the
+  Nmap Project offers a separate OEM license for such cases).
+- The scanner orchestrates these tools via subprocess / NSE and does not statically link them,
+  so your own code may use a different license.
+- This summary is informational and **not legal advice**; verify the full license texts shipped
+  with each component before redistribution.
