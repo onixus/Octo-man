@@ -12,7 +12,7 @@ class RuntimeConfig(BaseModel):
     logs_dir: str = ""
     retries: int = Field(default=2, ge=0, le=10)
     timeout_seconds: int = Field(default=1800, ge=30, le=86400)
-    nse_timeout_seconds: int = Field(default=900, ge=30, le=86400)
+    nse_timeout_seconds: int = Field(default=600, ge=30, le=600)
     nse_concurrency: int = Field(default=4, ge=1, le=64)
     nse_max_rate: int = Field(default=0, ge=0)
     keep_intermediate: bool = True
