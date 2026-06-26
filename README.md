@@ -18,6 +18,7 @@ Reproducible CLI pipeline for scanning large networks:
 - Host discovery and fast TCP port scan via `naabu`.
 - Enrichment with Nmap `-sV`, OS detection (`-O`) and NSE profiles (incl. `vuln`).
 - Parallel NSE/OS stage (configurable `nse_concurrency`) for faster large scans.
+- Parallel discovery/port batches (`discover_concurrency`, `ports_concurrency`) for faster naabu stages.
 - Retry + timeout handling per external command (with a separate per-host `nse_timeout_seconds`).
 - Range batching + fine-grained checkpoint/resume (per discovery/port batch and per NSE host).
 - Report exports with summary, parsed Nmap service data, OS matches and vulnerability findings.
@@ -299,6 +300,9 @@ Tune profile parameters in `scanner/config/default.yaml`.
 - `nse_profiles.<name>.scripts`: Nmap `--script` selector (e.g. `default,safe,vuln`).
 - `nse_profiles.<name>.os_detection`: enables `nmap -O --osscan-guess`.
 - `runtime.nse_concurrency` / `profiles.<name>.nse_concurrency`: number of nmap processes run in parallel.
+- `runtime.discover_concurrency` / `runtime.ports_concurrency`: number of naabu
+  discovery/port batches run in parallel (default `4`). Set to `1` for strictly serial
+  behavior. Effective pps ≈ `rate × concurrency`.
 - `runtime.nse_max_rate` / `profiles.<name>.nse_max_rate`: global packets/sec budget for the NSE/OS stage. It is split across the parallel nmap processes (each gets `nse_max_rate / nse_concurrency` via `nmap --max-rate`). `0` means unlimited (rely on the timing template). This keeps aggregate scan noise bounded regardless of concurrency.
 - `runtime.nse_timeout_seconds`: per-host nmap timeout (independent of the global command timeout; max **600** s / 10 min).
 
@@ -314,8 +318,11 @@ whole scan, and `--resume` only redoes what's left.
 - IPv4 networks larger than `batching.ipv4_prefix` are split into `/ipv4_prefix`
   batches (e.g. a `/16` becomes 16 × `/20`). Single IPs, IPv6 and smaller nets are
   grouped into chunks of `batching.max_targets_per_batch`.
-- Discovery and port-scan run **per batch**; alive hosts and open ports are
-  aggregated incrementally into `alive_ips.txt` / `open_ports.txt`.
+- Discovery and port-scan run **per batch** (optionally **in parallel** via
+  `runtime.discover_concurrency` / `runtime.ports_concurrency`); alive hosts and
+  open ports are aggregated incrementally into `alive_ips.txt` / `open_ports.txt`.
+  Each parallel naabu process uses the profile `discover_rate` / `port_rate`, so
+  effective network load scales with concurrency.
 - The NSE/OS stage is checkpointed **per host** — `--resume` skips hosts whose
   scan already completed.
 - Progress is tracked in `scanner/state/checkpoint.json` with stage flags and
