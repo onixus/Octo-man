@@ -13,6 +13,10 @@ runtime:
   # nmap processes (each gets nse_max_rate / nse_concurrency). 0 = unlimited.
   nse_max_rate: 0
   keep_intermediate: true
+  # Each run writes to output_dir/runs/<run_id>/ and state_dir/runs/<run_id>/.
+  per_run_output: true
+  log_max_bytes: 10485760
+  log_backup_count: 5
 
 profiles:
   safe:
