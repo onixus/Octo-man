@@ -133,7 +133,9 @@ tests/e2e/run.sh network-scan-cli:ci
 ### Image scanning & SBOM
 
 - **Trivy** scans the built image: a non-blocking report (CRITICAL/HIGH/MEDIUM) plus a gate
-  that fails only on **fixable CRITICAL** vulnerabilities.
+  that fails only on **fixable CRITICAL** vulnerabilities. Documented, accepted exceptions
+  (e.g. a CVE in an upstream tool binary with no fixed release yet) are listed in
+  `.trivyignore` — the report still shows them, only the gate skips them.
 - A **CycloneDX/SPDX SBOM** is generated (Syft) and uploaded as the `sbom` CI artifact.
 - The publish workflow additionally attaches **SBOM + SLSA provenance attestations** to the
   image pushed to GHCR (`sbom: true`, `provenance: mode=max`).
