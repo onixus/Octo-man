@@ -12,17 +12,25 @@ def host_discovery(
     timeout: int,
     retries: int,
     skip_discovery: bool,
+    tag: str = "all",
 ) -> list[str]:
-    input_file = output_dir / "all_targets.txt"
-    alive_file = output_dir / "alive_ips.txt"
+    """Run naabu host discovery for a single batch of targets.
+
+    Per-batch inputs/outputs live under ``output_dir/discover/<tag>.*`` so each
+    batch is independent and resumable. Returns the alive hosts for this batch.
+    """
+    batch_dir = output_dir / "discover"
+    input_file = batch_dir / f"{tag}.targets.txt"
+    alive_file = batch_dir / f"{tag}.alive.txt"
     write_lines(input_file, targets)
     if not targets:
         write_lines(alive_file, [])
         return []
 
     if skip_discovery:
-        write_lines(alive_file, targets)
-        return sorted(set(targets))
+        alive = sorted(set(targets))
+        write_lines(alive_file, alive)
+        return alive
 
     run_command(
         [
@@ -41,6 +49,7 @@ def host_discovery(
         timeout=timeout,
         retries=retries,
     )
+    if not alive_file.exists():
+        return []
     alive = [line.strip() for line in alive_file.read_text(encoding="utf-8").splitlines() if line.strip()]
-    write_lines(alive_file, alive)
     return sorted(set(alive))
