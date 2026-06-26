@@ -46,8 +46,6 @@ def fast_port_scan(
         str(rate),
         "-retries",
         "1",
-        "-o",
-        str(output_file),
     ]
     custom_ports = _flatten_custom_ports(custom_ports_file)
     if custom_ports:
@@ -55,8 +53,8 @@ def fast_port_scan(
     else:
         command.extend(["-top-ports", str(top_ports)])
 
-    run_command(command, timeout=timeout, retries=retries)
-    if not output_file.exists():
-        return []
-    entries = [line.strip() for line in output_file.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return sorted(set(entries))
+    # Parse naabu stdout (host:port per line) and persist it for artifacts.
+    result = run_command(command, timeout=timeout, retries=retries)
+    entries = sorted({line.strip() for line in (result.stdout or "").splitlines() if line.strip()})
+    write_lines(output_file, entries)
+    return entries

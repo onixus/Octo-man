@@ -32,7 +32,9 @@ def host_discovery(
         write_lines(alive_file, alive)
         return alive
 
-    run_command(
+    # naabu prints alive hosts to stdout in -sn mode (the -o file stays empty),
+    # so parse stdout and persist it to the per-batch file for artifacts.
+    result = run_command(
         [
             "naabu",
             "-list",
@@ -43,13 +45,10 @@ def host_discovery(
             str(rate),
             "-retries",
             "1",
-            "-o",
-            str(alive_file),
         ],
         timeout=timeout,
         retries=retries,
     )
-    if not alive_file.exists():
-        return []
-    alive = [line.strip() for line in alive_file.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return sorted(set(alive))
+    alive = sorted({line.strip() for line in (result.stdout or "").splitlines() if line.strip()})
+    write_lines(alive_file, alive)
+    return alive
