@@ -86,6 +86,53 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
 docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced --resume
 ```
 
+With per-run output enabled (default), resume continues the latest run recorded in
+`scanner/state/latest_run.json`, or pass an explicit id:
+
+```bash
+docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced \
+  --resume --run-id 20260626T104530Z
+```
+
+## Configuration validation
+
+The YAML config is validated at startup with **Pydantic** (`scanner/pipeline/config_schema.py`).
+Unknown keys, invalid profile references, out-of-range values, and missing required profiles
+(`safe`/`balanced`/`fast`) fail fast with a readable error (exit code `2`).
+
+## Per-run output directories
+
+When `runtime.per_run_output: true` (default), each scan writes to isolated directories:
+
+- `scanner/output/runs/<run_id>/` — artifacts and `run_meta.json`
+- `scanner/state/runs/<run_id>/` — checkpoint for that run
+- `scanner/state/latest_run.json` — pointer to the most recent run id
+
+`run_id` defaults to a UTC timestamp (`20260626T104530Z`) or can be set via `--run-id`.
+Set `per_run_output: false` to keep the legacy flat layout (`scanner/output/`).
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Unexpected internal error |
+| `2` | Configuration validation error |
+| `3` | No valid input targets after contract validation |
+| `4` | External tool stage failed after retries |
+| `130` | Interrupted (Ctrl+C) |
+
+## Logging
+
+Pipeline logs use a **rotating file** at `logs_dir/pipeline.log` (defaults:
+`log_max_bytes: 10485760`, `log_backup_count: 5`). Tune under `runtime:` in the config.
+
+## Resource limits (Docker Compose)
+
+`docker-compose.yml` sets container limits to reduce the risk of host exhaustion during large
+scans: `mem_limit: 4g`, `cpus: "4.0"`, and raised `nproc`/`nofile` ulimits. Adjust for your
+host capacity.
+
 ## Validation Helpers
 
 - `scripts/smoke.sh`:
@@ -99,7 +146,8 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
 
 Unit tests cover the pure helpers and parsers: input validation, port grouping,
 custom port parsing, IPv6 `host:port` handling, NSE rate-budget split, the nmap
-command builder, and report extraction (services, OS matches, CVE/CVSS + severity ranking).
+command builder, report extraction (services, OS matches, CVE/CVSS + severity ranking),
+config schema validation, and per-run directory resolution.
 
 ```bash
 pip install -r requirements-dev.txt

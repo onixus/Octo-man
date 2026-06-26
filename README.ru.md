@@ -37,6 +37,45 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
 docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced --resume
 ```
 
+С включённым `per_run_output` (по умолчанию) resume продолжает последний прогон из
+`scanner/state/latest_run.json` или явный id:
+
+```bash
+docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced \
+  --resume --run-id 20260626T104530Z
+```
+
+## Валидация конфигурации
+
+YAML проверяется при старте через **Pydantic** (`scanner/pipeline/config_schema.py`):
+неверные ключи, ссылки на несуществующие профили, выход за диапазоны — ошибка с кодом `2`.
+
+## Каталоги на каждый прогон
+
+При `runtime.per_run_output: true` (по умолчанию):
+
+- `scanner/output/runs/<run_id>/` — артефакты и `run_meta.json`
+- `scanner/state/runs/<run_id>/` — checkpoint
+- `scanner/state/latest_run.json` — указатель на последний `run_id`
+
+`run_id` — UTC-метка времени или `--run-id`. `per_run_output: false` — плоская схема как раньше.
+
+## Коды выхода
+
+| Код | Значение |
+|-----|----------|
+| `0` | Успех |
+| `1` | Неожиданная внутренняя ошибка |
+| `2` | Ошибка валидации конфигурации |
+| `3` | Нет валидных целей после проверки входа |
+| `4` | Сбой внешнего инструмента после ретраев |
+| `130` | Прерывание (Ctrl+C) |
+
+## Логирование и лимиты
+
+- Ротация логов: `pipeline.log` с `log_max_bytes` / `log_backup_count` в `runtime:`.
+- `docker-compose.yml`: `mem_limit: 4g`, `cpus: "4.0"`, ulimits `nproc`/`nofile`.
+
 ## Рекомендации по профилям и rate-limit
 
 Ниже стартовые значения для `discover_rate` / `port_rate`.  
