@@ -11,8 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     jq \
     nmap \
-    masscan \
     && rm -rf /var/lib/apt/lists/*
+
+# Pin external scanner versions for reproducible builds.
+ARG DNSX_VERSION=1.2.3
+ARG NAABU_VERSION=2.6.1
 
 RUN set -eux; \
     ARCH="$(dpkg --print-architecture)"; \
@@ -21,8 +24,8 @@ RUN set -eux; \
       arm64) GOARCH="arm64" ;; \
       *) echo "Unsupported architecture: ${ARCH}"; exit 1 ;; \
     esac; \
-    curl -fsSL "https://github.com/projectdiscovery/dnsx/releases/latest/download/dnsx_linux_${GOARCH}.zip" -o /tmp/dnsx.zip; \
-    curl -fsSL "https://github.com/projectdiscovery/naabu/releases/latest/download/naabu_linux_${GOARCH}.zip" -o /tmp/naabu.zip; \
+    curl -fsSL "https://github.com/projectdiscovery/dnsx/releases/download/v${DNSX_VERSION}/dnsx_${DNSX_VERSION}_linux_${GOARCH}.zip" -o /tmp/dnsx.zip; \
+    curl -fsSL "https://github.com/projectdiscovery/naabu/releases/download/v${NAABU_VERSION}/naabu_${NAABU_VERSION}_linux_${GOARCH}.zip" -o /tmp/naabu.zip; \
     apt-get update && apt-get install -y --no-install-recommends unzip; \
     unzip -q /tmp/dnsx.zip -d /usr/local/bin; \
     unzip -q /tmp/naabu.zip -d /usr/local/bin; \
