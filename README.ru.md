@@ -7,7 +7,7 @@
 
 Решение выполняет контейнеризированный пайплайн для больших сетей:
 - вход: `CIDR + IP + FQDN`
-- этапы: `resolve -> discovery -> fast ports -> Nmap NSE`
+- этапы: `resolve -> discovery -> fast ports -> Nmap NSE (версии сервисов/ОС + уязвимости/CVE)`
 - выход: `JSON/JSONL/CSV` + сводка `Markdown/HTML`
 
 ## Быстрый старт
@@ -104,12 +104,29 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
 ./scripts/load-test.sh 10.0.0.0/16
 ```
 
-- Модульные тесты чистых функций:
+- Модульные тесты чистых функций и парсеров (валидация входа, группировка портов,
+  разбор `host:port` с IPv6, деление rate-budget, сборка команды nmap, извлечение
+  сервисов/ОС/CVE с CVSS и severity из отчётов nmap):
 
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q
+ruff check scanner tests
 ```
+
+## Контейнерный образ (GHCR) и CI
+
+- CI (`.github/workflows/ci.yml`) на каждый push в `master` и PR гоняет `ruff`, `pytest`
+  (Python 3.11/3.12) и сборку Docker-образа со smoke-проверкой инструментов.
+- Публикация (`.github/workflows/docker-publish.yml`) собирает мультиарх-образ
+  (`linux/amd64`, `linux/arm64`) и пушит его в GHCR по тегу `v*`, при релизе или вручную.
+- Готовый образ: `ghcr.io/onixus/octo-man` (теги `latest`, `vX.Y.Z`, `sha-<...>`).
+
+```bash
+docker pull ghcr.io/onixus/octo-man:latest
+```
+
+Подробности и пример запуска — в [README.md](README.md#container-image-ghcr).
 
 ## Эксплуатационные замечания
 

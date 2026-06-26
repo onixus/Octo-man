@@ -7,7 +7,7 @@ For a Russian version with extra operational recommendations, see [README.ru.md]
 
 Reproducible CLI pipeline for scanning large networks:
 - input: `CIDR + IP + FQDN`
-- stages: `resolve -> discovery -> fast ports -> Nmap NSE`
+- stages: `resolve -> discovery -> fast ports -> Nmap NSE (service/OS detection + vuln/CVE)`
 - output: `JSON/JSONL/CSV` + `Markdown/HTML` summary
 
 ## What It Implements
@@ -74,7 +74,7 @@ Edit:
 - `scanner/inputs/domains.txt`
 - optional `scanner/inputs/ports.txt`
 
-### 3) Run standard scan
+### 3) Run a scan
 
 ```bash
 docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced
@@ -97,7 +97,9 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
 
 ## Tests
 
-Unit tests cover the pure helpers (input validation, port grouping, custom port parsing):
+Unit tests cover the pure helpers and parsers: input validation, port grouping,
+custom port parsing, IPv6 `host:port` handling, NSE rate-budget split, the nmap
+command builder, and report extraction (services, OS matches, CVE/CVSS + severity ranking).
 
 ```bash
 pip install -r requirements-dev.txt
@@ -119,22 +121,23 @@ ruff check scanner tests
 and pushes it to GitHub Container Registry. It runs when a `v*` tag is pushed, when a GitHub
 release is published, or manually via **workflow_dispatch**.
 
-Published as `ghcr.io/<owner>/<repo>` (name lowercased). Tagging:
+Published as `ghcr.io/onixus/octo-man` (image name is the lowercased `owner/repo`). Tagging:
 
 - a version tag `vX.Y.Z` produces image tags `X.Y.Z`, `X.Y`, `X`, the commit `sha-<...>` and `latest`;
+- non-semver tags (e.g. `v0.0.1a`) are published verbatim as the image tag (plus `latest`);
 - `workflow_dispatch` can publish an extra ad-hoc tag via the `tag` input.
 
 Pull and run:
 
 ```bash
-docker pull ghcr.io/<owner>/<repo>:latest
+docker pull ghcr.io/onixus/octo-man:latest
 docker run --rm \
   --cap-add NET_RAW --cap-add NET_ADMIN \
   -v "$PWD/scanner/inputs:/app/scanner/inputs" \
   -v "$PWD/scanner/output:/app/scanner/output" \
   -v "$PWD/scanner/config:/app/scanner/config" \
   -v "$PWD/scanner/state:/app/scanner/state" \
-  ghcr.io/<owner>/<repo>:latest --config scanner/config/default.yaml --mode balanced
+  ghcr.io/onixus/octo-man:latest --config scanner/config/default.yaml --mode balanced
 ```
 
 To cut a release build, push a tag:
@@ -143,11 +146,14 @@ To cut a release build, push a tag:
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
+> The GHCR package may be **private** by default; make it public (or authenticate
+> with a token) to pull it from other hosts.
+
 ## Profiles
 
-- `safe`: lower packet rate, `top-100`, conservative timing, `baseline` NSE (no `vuln`), `nse_concurrency: 2`.
-- `balanced`: default profile, `top-1000`, `vuln` NSE + OS detection, `nse_concurrency: 4`.
-- `fast`: higher discovery/scan rate, `top-1000`, `vuln` NSE + OS detection, `nse_concurrency: 8`.
+- `safe`: lower packet rate, `top-100`, conservative timing, `baseline` NSE (no `vuln`), `nse_concurrency: 2`, `nse_max_rate: 500`.
+- `balanced`: default profile, `top-1000`, `vuln` NSE + OS detection, `nse_concurrency: 4`, `nse_max_rate: 2000`.
+- `fast`: higher discovery/scan rate, `top-1000`, `vuln` NSE + OS detection, `nse_concurrency: 8`, `nse_max_rate: 5000`.
 
 ### Vulnerability checking
 
@@ -181,6 +187,8 @@ OS detection and SYN/ICMP probing require raw sockets. The container is granted
 
 - `scanner/output/normalized/ip_targets.txt`
 - `scanner/output/normalized/fqdn_targets.txt`
+- `scanner/output/normalized/contract_validation.json` (counts + rejected inputs)
+- `scanner/output/dns_resolution.json` / `scanner/output/dnsx_records.jsonl` (DNS resolve data)
 - `scanner/output/resolved_ips.txt`
 - `scanner/output/all_targets.txt`
 - `scanner/output/alive_ips.txt`
