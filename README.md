@@ -19,7 +19,7 @@ Reproducible CLI pipeline for scanning large networks:
 - Enrichment with Nmap `-sV`, OS detection (`-O`) and NSE profiles (incl. `vuln`).
 - Parallel NSE/OS stage (configurable `nse_concurrency`) for faster large scans.
 - Retry + timeout handling per external command (with a separate per-host `nse_timeout_seconds`).
-- Checkpoint/resume support.
+- Range batching + fine-grained checkpoint/resume (per discovery/port batch and per NSE host).
 - Report exports with summary, parsed Nmap service data, OS matches and vulnerability findings.
 
 ## Project Layout
@@ -172,6 +172,32 @@ git tag v0.1.0 && git push origin v0.1.0
 > The GHCR package may be **private** by default; make it public (or authenticate
 > with a token) to pull it from other hosts.
 
+## Reproducible & Pinned Builds
+
+The image is pinned end-to-end so a rebuild is byte-reproducible and protected from
+upstream/MITM tampering:
+
+- **Base image** pinned by multi-arch **index digest** (`python:3.12-slim@sha256:...`).
+- **dnsx / naabu** pinned by version **and** per-arch **sha256** (`*_SHA256_AMD64/ARM64`
+  build args); the downloaded archive is verified with `sha256sum -c` during build.
+- **nmap-vulners / vulscan** pinned to specific **commit SHAs** (`NMAP_VULNERS_REF`,
+  `VULSCAN_REF`).
+
+Upgrading a pin:
+
+```bash
+# base image digest
+docker manifest inspect python:3.12-slim | grep -m1 digest
+# tool sha256 (from the release checksums file)
+curl -fsSL https://github.com/projectdiscovery/dnsx/releases/download/vX.Y.Z/dnsx_X.Y.Z_checksums.txt
+# NSE script commit
+git ls-remote https://github.com/vulnersCom/nmap-vulners.git HEAD
+```
+
+Then update the corresponding `FROM ... @sha256` / `ARG` defaults in the `Dockerfile`
+(or override them via `--build-arg`). Because the digest is frozen, re-pin periodically to
+pick up base-image security updates (see image scanning in the production hardening backlog).
+
 ## Profiles
 
 - `safe`: lower packet rate, `top-100`, conservative timing, `baseline` NSE (no `vuln`), `nse_concurrency: 2`, `nse_max_rate: 500`.
@@ -206,6 +232,27 @@ Tune profile parameters in `scanner/config/default.yaml`.
 OS detection and SYN/ICMP probing require raw sockets. The container is granted
 `NET_RAW`/`NET_ADMIN` via `docker-compose.yml`; outside compose run with equivalent capabilities.
 
+## Batching & Resume
+
+Large inputs are split into independent, resumable batches so a single huge
+`naabu`/`nmap` run can't hit the global timeout, a failed batch doesn't abort the
+whole scan, and `--resume` only redoes what's left.
+
+- IPv4 networks larger than `batching.ipv4_prefix` are split into `/ipv4_prefix`
+  batches (e.g. a `/16` becomes 16 × `/20`). Single IPs, IPv6 and smaller nets are
+  grouped into chunks of `batching.max_targets_per_batch`.
+- Discovery and port-scan run **per batch**; alive hosts and open ports are
+  aggregated incrementally into `alive_ips.txt` / `open_ports.txt`.
+- The NSE/OS stage is checkpointed **per host** — `--resume` skips hosts whose
+  scan already completed.
+- Progress is tracked in `scanner/state/checkpoint.json` with stage flags and
+  per-item sets (`discover`/`ports` batch ids, `nse` hosts). Writes are atomic
+  per item and thread-safe.
+
+Tune or disable batching under `batching:` in `scanner/config/default.yaml`
+(`enabled`, `ipv4_prefix`, `max_targets_per_batch`). Smaller `ipv4_prefix` means
+finer resume granularity at the cost of more tool invocations.
+
 ## Output Artifacts
 
 - `scanner/output/normalized/ip_targets.txt`
@@ -214,8 +261,8 @@ OS detection and SYN/ICMP probing require raw sockets. The container is granted
 - `scanner/output/dns_resolution.json` / `scanner/output/dnsx_records.jsonl` (DNS resolve data)
 - `scanner/output/resolved_ips.txt`
 - `scanner/output/all_targets.txt`
-- `scanner/output/alive_ips.txt`
-- `scanner/output/open_ports.txt`
+- `scanner/output/alive_ips.txt` (aggregated; per-batch files under `scanner/output/discover/`)
+- `scanner/output/open_ports.txt` (aggregated; per-batch files under `scanner/output/ports/`)
 - `scanner/output/nse_targets.txt`
 - `scanner/output/nmap/*` (`.nmap`, `.gnmap`, `.xml`)
 - `scanner/output/findings.{json,jsonl,csv}`

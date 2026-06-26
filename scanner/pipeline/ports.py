@@ -22,9 +22,16 @@ def fast_port_scan(
     timeout: int,
     retries: int,
     custom_ports_file: Path,
+    tag: str = "all",
 ) -> list[str]:
-    input_file = output_dir / "alive_ips.txt"
-    output_file = output_dir / "open_ports.txt"
+    """Run a naabu fast port scan for a single batch of alive hosts.
+
+    Per-batch inputs/outputs live under ``output_dir/ports/<tag>.*``. Returns
+    the ``host:port`` entries discovered for this batch.
+    """
+    batch_dir = output_dir / "ports"
+    input_file = batch_dir / f"{tag}.hosts.txt"
+    output_file = batch_dir / f"{tag}.open.txt"
     write_lines(input_file, alive_hosts)
     if not alive_hosts:
         write_lines(output_file, [])
@@ -49,6 +56,7 @@ def fast_port_scan(
         command.extend(["-top-ports", str(top_ports)])
 
     run_command(command, timeout=timeout, retries=retries)
+    if not output_file.exists():
+        return []
     entries = [line.strip() for line in output_file.read_text(encoding="utf-8").splitlines() if line.strip()]
-    write_lines(output_file, entries)
     return sorted(set(entries))

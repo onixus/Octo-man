@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -99,6 +100,8 @@ def run_nse(
     retries: int,
     concurrency: int,
     max_rate: int = 0,
+    done_hosts: Iterable[str] | None = None,
+    on_host_done: Callable[[str], None] | None = None,
 ) -> Path:
     grouped = _group_ports_by_host(host_port_list)
     targets_file = output_dir / "nse_targets.txt"
@@ -110,11 +113,19 @@ def run_nse(
     if not grouped:
         return nmap_output_dir
 
+    already_done = set(done_hosts or ())
+    pending = {host: ports for host, ports in grouped.items() if host not in already_done}
+    skipped = len(grouped) - len(pending)
+    if skipped:
+        logging.info("Resuming NSE: skipping %s already-scanned hosts", skipped)
+    if not pending:
+        return nmap_output_dir
+
     workers = max(1, concurrency)
     per_process_rate = _per_process_rate(max_rate, workers)
     logging.info(
         "Running NSE/OS scans for %s hosts (concurrency=%s, global_max_rate=%s pps, per_process_rate=%s pps)",
-        len(grouped),
+        len(pending),
         workers,
         max_rate if max_rate > 0 else "unlimited",
         per_process_rate if per_process_rate > 0 else "unlimited",
@@ -134,7 +145,7 @@ def run_nse(
                 timeout,
                 retries,
             ): host
-            for host, ports in grouped.items()
+            for host, ports in pending.items()
         }
         for future in as_completed(futures):
             host = futures[future]
@@ -142,5 +153,8 @@ def run_nse(
                 future.result()
             except Exception as exc:  # noqa: BLE001
                 logging.warning("NSE scan failed for %s: %s", host, exc)
+                continue
+            if on_host_done is not None:
+                on_host_done(host)
 
     return nmap_output_dir
