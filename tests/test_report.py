@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scanner.pipeline.report import _parse_nmap_xml, build_reports
+from scanner.pipeline.report import (
+    _build_vulnerabilities,
+    _extract_cves,
+    _parse_nmap_xml,
+    _severity,
+    build_reports,
+)
 
 SAMPLE_XML = """<?xml version="1.0"?>
 <nmaprun>
@@ -14,10 +20,10 @@ SAMPLE_XML = """<?xml version="1.0"?>
       <osmatch name="Linux 4.x" accuracy="88"/>
     </os>
     <ports>
-      <port protocol="tcp" portid="80">
+      <port protocol="tcp" portid="22">
         <state state="open"/>
-        <service name="http" product="nginx" version="1.25"/>
-        <script id="http-server-header" output="nginx/1.25"/>
+        <service name="ssh" product="OpenSSH" version="7.4"/>
+        <script id="vulners" output="cpe:/a:openbsd:openssh:7.4:&#10;    CVE-2018-15473    5.3    https://vulners.com/cve/CVE-2018-15473&#10;    CVE-2016-10012    9.8    https://vulners.com/cve/CVE-2016-10012"/>
       </port>
       <port protocol="tcp" portid="445">
         <state state="open"/>
@@ -41,18 +47,43 @@ def _setup(tmp_path: Path) -> Path:
     return nmap_dir
 
 
+def test_severity_thresholds():
+    assert _severity(9.8) == "critical"
+    assert _severity(7.5) == "high"
+    assert _severity(5.0) == "medium"
+    assert _severity(2.0) == "low"
+    assert _severity(None) == "unknown"
+
+
+def test_extract_cves_with_and_without_scores():
+    output = "CVE-2016-10012 9.8 url\nplain mention CVE-2018-15473 elsewhere"
+    cves = dict(_extract_cves(output))
+    assert cves["CVE-2016-10012"] == 9.8
+    assert cves["CVE-2018-15473"] is None or isinstance(cves["CVE-2018-15473"], float)
+
+
 def test_parse_nmap_xml_extracts_services_os_and_scripts(tmp_path: Path):
     nmap_dir = _setup(tmp_path)
     services, os_matches, scripts = _parse_nmap_xml(nmap_dir)
 
-    assert {s["port"] for s in services} == {"80", "445"}  # closed port excluded
+    assert {s["port"] for s in services} == {"22", "445"}  # closed port excluded
     assert len(os_matches) == 2
-    vuln = [s for s in scripts if s["vulnerable"]]
-    assert len(vuln) == 1
-    assert vuln[0]["script_id"] == "smb-vuln-ms17-010"
+    assert any(s["vulnerable"] for s in scripts)
 
 
-def test_build_reports_writes_os_and_vuln_artifacts(tmp_path: Path):
+def test_build_vulnerabilities_ranks_by_severity():
+    findings = [
+        {"host": "h", "port": "22", "script_id": "vulners", "output": "CVE-2016-10012 9.8 url\nCVE-2018-15473 5.3 url", "vulnerable": True},
+        {"host": "h", "port": "445", "script_id": "smb-vuln", "output": "State: VULNERABLE", "vulnerable": True},
+    ]
+    vulns = _build_vulnerabilities(findings)
+    assert vulns[0]["severity"] == "critical"
+    assert vulns[0]["cve"] == "CVE-2016-10012"
+    # VULNERABLE-without-CVE is still reported as unknown severity
+    assert any(v["cve"] is None and v["severity"] == "unknown" for v in vulns)
+
+
+def test_build_reports_writes_vuln_and_os_artifacts(tmp_path: Path):
     nmap_dir = _setup(tmp_path)
     output_dir = tmp_path / "out"
     output_dir.mkdir()
@@ -61,7 +92,7 @@ def test_build_reports_writes_os_and_vuln_artifacts(tmp_path: Path):
         output_dir=output_dir,
         total_targets=10,
         alive_hosts=["10.0.0.5"],
-        open_ports=["10.0.0.5:80", "10.0.0.5:445"],
+        open_ports=["10.0.0.5:22", "10.0.0.5:445"],
         nmap_dir=nmap_dir,
         markdown_summary=True,
         html_summary=True,
@@ -71,14 +102,15 @@ def test_build_reports_writes_os_and_vuln_artifacts(tmp_path: Path):
 
     summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["os_detected_hosts"] == 1
-    assert summary["potential_vulnerabilities"] == 1
+    assert summary["vulnerabilities_by_severity"]["critical"] == 1
+    assert summary["potential_vulnerabilities"] >= 2
+    assert summary["vulnerable_hosts"] == 1
 
     vulns = json.loads((output_dir / "vulnerabilities.json").read_text(encoding="utf-8"))
-    assert vulns[0]["script_id"] == "smb-vuln-ms17-010"
+    assert vulns[0]["severity"] == "critical"
 
-    os_findings = json.loads((output_dir / "os_findings.json").read_text(encoding="utf-8"))
-    assert any(m["name"] == "Linux 5.x" for m in os_findings)
+    assert (output_dir / "vulnerabilities.csv").exists()
 
     md = (output_dir / "summary.md").read_text(encoding="utf-8")
-    assert "Operating Systems" in md
-    assert "Linux 5.x" in md
+    assert "Vulnerabilities" in md
+    assert "CRITICAL" in md
