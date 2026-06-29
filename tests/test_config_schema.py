@@ -99,7 +99,7 @@ def test_discovery_bench_yaml_parses():
     cfg = AppConfig.model_validate(yaml.safe_load(text))
     assert cfg.runtime.discover_concurrency == 8
     assert cfg.discovery.skip_discovery is False
-    assert cfg.profiles["balanced"].discover_rate == 3000
+    assert cfg.profiles["balanced"].discover_rate == 6000
 
 
 def test_discovery_bench_realistic_yaml_parses():
