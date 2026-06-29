@@ -55,6 +55,9 @@ discovery:
   verify:
     enabled: true
     rate: 1250
+  hostnames:
+    forward: true
+    reverse: false
 
 ports:
   source: naabu

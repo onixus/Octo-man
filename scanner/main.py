@@ -15,12 +15,13 @@ from scanner.pipeline.config_schema import AppConfig, format_validation_error, l
 from scanner.pipeline.contract import validate_inputs
 from scanner.pipeline.discovery_runner import run_discovery_stage, verify_alive_without_ports
 from scanner.pipeline.errors import StageFailureError
+from scanner.pipeline.hostnames import enrich_discovery_hostnames
 from scanner.pipeline.nse import run_nse
 from scanner.pipeline.ports import fast_port_scan
 from scanner.pipeline.report import build_reports
 from scanner.pipeline.resolve import resolve_fqdns
 from scanner.pipeline.run_context import resolve_run_paths, write_run_meta
-from scanner.pipeline.utils import load_yaml, read_lines, setup_logging, write_lines
+from scanner.pipeline.utils import load_json, load_yaml, read_lines, setup_logging, write_lines
 
 
 def parse_args() -> argparse.Namespace:
@@ -130,6 +131,22 @@ def _run_pipeline(args: argparse.Namespace) -> int:
             make_batches=make_batches,
         )
 
+    hostnames_file = paths.output_dir / "hostnames.json"
+    if args.resume and checkpoint.is_done("discover-hostnames"):
+        hostnames_map: dict = load_json(hostnames_file, fallback={})
+    else:
+        hostnames_map = _run_stage(
+            "discover-hostnames",
+            lambda: enrich_discovery_hostnames(
+                alive_hosts,
+                paths.output_dir,
+                config.discovery,
+                timeout=timeout,
+                retries=retries,
+            ),
+        )
+        checkpoint.mark_done("discover-hostnames")
+
     open_file = paths.output_dir / "open_ports.txt"
     if args.resume and checkpoint.is_done("ports"):
         open_ports = sorted(set(read_lines(open_file)))
@@ -216,6 +233,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         alive_hosts=alive_hosts,
         open_ports=open_ports,
         nmap_dir=nmap_dir,
+        hostnames_map=hostnames_map,
         markdown_summary=reporting.markdown_summary,
         html_summary=reporting.html_summary,
         csv_export=reporting.csv_export,
