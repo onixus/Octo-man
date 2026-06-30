@@ -60,6 +60,13 @@ class VerifyDiscoveryConfig(BaseModel):
     rate: int | None = Field(default=None, ge=1, le=100_000)
 
 
+class HostnameResolveConfig(BaseModel):
+    # Map alive IPs to input FQDNs from dns_resolution.json (resolve stage).
+    forward: bool = True
+    # PTR lookup via dnsx for alive IPs after discovery.
+    reverse: bool = True
+
+
 class DiscoveryConfig(BaseModel):
     source: Literal["naabu"] = "naabu"
     skip_discovery: bool = False
@@ -71,6 +78,7 @@ class DiscoveryConfig(BaseModel):
     exclude_alive: list[str] = Field(default_factory=list)
     exclude_last_octets: list[int] = Field(default_factory=list)
     verify: VerifyDiscoveryConfig = Field(default_factory=VerifyDiscoveryConfig)
+    hostnames: HostnameResolveConfig = Field(default_factory=HostnameResolveConfig)
 
 
 class PortsConfig(BaseModel):

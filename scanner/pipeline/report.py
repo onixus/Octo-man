@@ -151,6 +151,17 @@ def _build_vulnerabilities(script_findings: list[dict]) -> list[dict]:
     return vulnerabilities
 
 
+def _lookup_hostname(hostnames_map: dict, host: str) -> str:
+    entry = hostnames_map.get(host) or {}
+    primary = entry.get("primary")
+    if isinstance(primary, str) and primary:
+        return primary
+    names = entry.get("names")
+    if isinstance(names, list) and names:
+        return str(names[0])
+    return ""
+
+
 def build_reports(
     output_dir: Path,
     total_targets: int,
@@ -161,12 +172,24 @@ def build_reports(
     html_summary: bool,
     csv_export: bool,
     json_export: bool,
+    hostnames_map: dict | None = None,
 ) -> None:
+    hostnames = hostnames_map or {}
     findings, os_matches, script_findings = _parse_nmap_xml(nmap_dir)
+    if hostnames:
+        for item in findings:
+            item["hostname"] = _lookup_hostname(hostnames, item["host"])
+        for item in script_findings:
+            item["hostname"] = _lookup_hostname(hostnames, item["host"])
+        for item in os_matches:
+            item["hostname"] = _lookup_hostname(hostnames, item["host"])
     service_counter = Counter(item["service"] for item in findings)
     vulnerabilities = _build_vulnerabilities(script_findings)
     severity_counts = Counter(item["severity"] for item in vulnerabilities)
     vulnerable_hosts = sorted({item["host"] for item in vulnerabilities})
+    hosts_with_names = sum(
+        1 for host in alive_hosts if _lookup_hostname(hostnames, host)
+    )
 
     best_os_by_host: dict[str, dict] = {}
     for match in os_matches:
@@ -178,6 +201,7 @@ def build_reports(
     summary = {
         "total_targets": total_targets,
         "alive_hosts": len(alive_hosts),
+        "alive_hosts_with_names": hosts_with_names,
         "open_host_port_pairs": len(open_ports),
         "nmap_open_services": len(findings),
         "os_detected_hosts": len(best_os_by_host),
@@ -190,6 +214,19 @@ def build_reports(
         "top_services": service_counter.most_common(15),
     }
     save_json(output_dir / "summary.json", summary)
+
+    if hostnames:
+        save_json(
+            output_dir / "alive_hosts.json",
+            [
+                {
+                    "host": host,
+                    "hostname": _lookup_hostname(hostnames, host),
+                    "names": (hostnames.get(host) or {}).get("names", []),
+                }
+                for host in sorted(set(alive_hosts))
+            ],
+        )
 
     # OS and vulnerability findings are core deliverables and always exported.
     save_json(output_dir / "os_findings.json", os_matches)
@@ -212,10 +249,12 @@ def build_reports(
 
     if csv_export:
         csv_path = output_dir / "findings.csv"
+        fieldnames = ["host", "hostname", "port", "protocol", "service", "product", "version"]
         with csv_path.open("w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=["host", "port", "protocol", "service", "product", "version"])
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(findings)
+            for item in findings:
+                writer.writerow({key: item.get(key, "") for key in fieldnames})
 
     if markdown_summary:
         sev = summary["vulnerabilities_by_severity"]
@@ -224,6 +263,7 @@ def build_reports(
             "",
             f"- Total targets: {summary['total_targets']}",
             f"- Alive hosts: {summary['alive_hosts']}",
+            f"- Alive hosts with resolved names: {summary['alive_hosts_with_names']}",
             f"- Open host:port pairs: {summary['open_host_port_pairs']}",
             f"- Parsed open services from Nmap XML: {summary['nmap_open_services']}",
             f"- Hosts with OS detected: {summary['os_detected_hosts']}",

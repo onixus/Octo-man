@@ -75,6 +75,9 @@ discovery:
   exclude_last_octets: []
   verify:
     enabled: false
+  hostnames:
+    forward: true
+    reverse: true
 
 ports:
   source: naabu
