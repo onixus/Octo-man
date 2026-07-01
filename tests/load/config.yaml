@@ -38,6 +38,7 @@ batching:
 
 discovery:
   source: naabu
+  profile: custom
   skip_discovery: false
 
 ports:

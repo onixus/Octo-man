@@ -193,43 +193,54 @@ def run_discovery_stage(
             stats["coverage_pct"],
         )
         if len(gap) >= adaptive.min_gap:
-            wave2_rate = _wave2_rate(profile, adaptive.wave2_rate)
-            logging.info(
-                "discovery wave2: %s gap host(s) at rate %s",
-                len(gap),
-                wave2_rate,
+            skip_wave2 = (
+                adaptive.min_coverage_pct is not None
+                and stats["coverage_pct"] >= adaptive.min_coverage_pct
             )
-            wave2_batches = batch_fn(gap)
-            wave2_disjoint = discovery.disjoint_batches and batches_are_disjoint(wave2_batches)
-            wave2_workers = _discover_concurrency(
-                config,
-                wave2_batches,
-                skip_known_alive=True,
-            )
-            if wave2_disjoint and wave2_workers > 1:
+            if skip_wave2:
                 logging.info(
-                    "discovery wave2: disjoint batches — parallel discover (concurrency=%s)",
-                    wave2_workers,
+                    "discovery wave2: skipped (coverage %.1f%% >= %.1f%%)",
+                    stats["coverage_pct"],
+                    adaptive.min_coverage_pct,
                 )
-            wave2_done = checkpoint.done_items("discover-wave2") if resume else set()
-            _run_discover_batches(
-                stage="discover-wave2",
-                checkpoint_key="discover-wave2",
-                batches=wave2_batches,
-                alive_set=alive_set,
-                alive_file=alive_file,
-                output_dir=output_dir,
-                rate=wave2_rate,
-                timeout=timeout,
-                retries=retries,
-                skip_discovery=False,
-                skip_known_alive=True,
-                concurrency=wave2_workers,
-                checkpoint=checkpoint,
-                done_ids=wave2_done,
-                config=config,
-            )
-            alive_set = _apply_alive_filters(alive_set, config, alive_file)
+            else:
+                wave2_rate = _wave2_rate(profile, adaptive.wave2_rate)
+                logging.info(
+                    "discovery wave2: %s gap host(s) at rate %s",
+                    len(gap),
+                    wave2_rate,
+                )
+                wave2_batches = batch_fn(gap)
+                wave2_disjoint = discovery.disjoint_batches and batches_are_disjoint(wave2_batches)
+                wave2_workers = _discover_concurrency(
+                    config,
+                    wave2_batches,
+                    skip_known_alive=True,
+                )
+                if wave2_disjoint and wave2_workers > 1:
+                    logging.info(
+                        "discovery wave2: disjoint batches — parallel discover (concurrency=%s)",
+                        wave2_workers,
+                    )
+                wave2_done = checkpoint.done_items("discover-wave2") if resume else set()
+                _run_discover_batches(
+                    stage="discover-wave2",
+                    checkpoint_key="discover-wave2",
+                    batches=wave2_batches,
+                    alive_set=alive_set,
+                    alive_file=alive_file,
+                    output_dir=output_dir,
+                    rate=wave2_rate,
+                    timeout=timeout,
+                    retries=retries,
+                    skip_discovery=False,
+                    skip_known_alive=True,
+                    concurrency=wave2_workers,
+                    checkpoint=checkpoint,
+                    done_ids=wave2_done,
+                    config=config,
+                )
+                alive_set = _apply_alive_filters(alive_set, config, alive_file)
         checkpoint.mark_done("discover-wave2")
 
     if not discovery.skip_discovery:

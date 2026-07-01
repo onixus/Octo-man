@@ -53,6 +53,8 @@ class AdaptiveDiscoveryConfig(BaseModel):
     wave2_rate: int | None = Field(default=None, ge=1, le=100_000)
     min_gap: int = Field(default=1, ge=0, le=1_000_000)
     max_gap_hosts: int = Field(default=65536, ge=1, le=1_000_000)
+    # Skip wave-2 when coverage already meets this percent (fast profile).
+    min_coverage_pct: float | None = Field(default=None, ge=0.0, le=100.0)
 
 
 class VerifyDiscoveryConfig(BaseModel):
@@ -85,6 +87,7 @@ class TcpProbeDiscoveryConfig(BaseModel):
 
 
 ProbeMethod = Literal["icmp", "tcp", "naabu"]
+DiscoveryProfileSetting = Literal["auto", "fast", "balanced", "thorough", "custom"]
 _DEFAULT_PROBE_ORDER: list[ProbeMethod] = ["icmp", "tcp", "naabu"]
 
 
@@ -97,6 +100,8 @@ class HostnameResolveConfig(BaseModel):
 
 class DiscoveryConfig(BaseModel):
     source: Literal["naabu"] = "naabu"
+    # auto: derive from runtime.mode (safe→thorough, balanced→balanced, fast→fast)
+    profile: DiscoveryProfileSetting = "auto"
     skip_discovery: bool = False
     # Skip hosts already found alive in earlier discover batches (overlapping batches only).
     skip_known_alive: bool = True

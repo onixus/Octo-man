@@ -345,6 +345,7 @@ Under `discovery:` in the config:
 
 ```yaml
 discovery:
+  profile: auto              # auto | fast | balanced | thorough | custom
   skip_discovery: false       # true = treat input IPs as alive (synthetic/load tests)
   skip_known_alive: true      # skip IPs already found in earlier discover batches
   disjoint_batches: true      # parallel discover when batches do not overlap
@@ -367,6 +368,16 @@ discovery:
 ```
 
 For **firewall-heavy** networks, enable `tcp_probe` (and optionally `icmp`) so hosts blocking ICMP still surface via TCP/80 or /443 before the full `naabu -sn` sweep. Per-method hit counts are written to `discovery_stats.json`.
+
+**Discovery presets** (`discovery.profile: auto` maps from `runtime.mode` — `safe`→thorough, `balanced`→balanced, `fast`→fast):
+
+| Preset | Wave2 | Verify | ICMP | PTR | discover_rate |
+|--------|-------|--------|------|-----|---------------|
+| fast | skip if coverage ≥95% | off | off | off | ×1.5 |
+| balanced | gap ≥ min_gap | off | off | forward only | ×1 |
+| thorough | gap ≥ min_gap | on | on | forward+reverse | ×0.75 |
+
+Set `discovery.profile: custom` to keep YAML values without preset overrides.
 
 Wave-1 splits targets via `batching:` (same rules as ports). When batches are **disjoint**
 (e.g. `/22` → four `/24`s), discovery runs with `discover_concurrency` in parallel. Overlapping
