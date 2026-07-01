@@ -21,6 +21,21 @@ def _wave2_rate(profile: ProfileConfig, configured: int | None) -> int:
     return max(500, profile.discover_rate // 4)
 
 
+def _discover_concurrency(
+    config: AppConfig,
+    batches: list[tuple[str, list[str]]],
+    *,
+    skip_known_alive: bool,
+) -> int:
+    """Return discover worker count: parallel when batches are disjoint, else serial if skipping known alive."""
+    disjoint = config.discovery.disjoint_batches and batches_are_disjoint(batches)
+    if disjoint:
+        return config.runtime.discover_concurrency
+    if skip_known_alive:
+        return 1
+    return config.runtime.discover_concurrency
+
+
 def _make_batches(config: AppConfig, items: list[str]) -> list[tuple[str, list[str]]]:
     batching = config.batching
     if batching.enabled:
@@ -110,10 +125,12 @@ def run_discovery_stage(
     alive_set: set[str] = set(read_lines(alive_file)) if resume and alive_file.exists() else set()
     discovery = config.discovery
     runtime = config.runtime
-    disjoint = discovery.disjoint_batches and batches_are_disjoint(batch_fn(all_targets))
 
+    wave1_done = checkpoint.done_items("discover") if resume else set()
+    wave1_batches = batch_fn(all_targets)
+    disjoint = discovery.disjoint_batches and batches_are_disjoint(wave1_batches)
     skip_known = discovery.skip_known_alive and not disjoint
-    wave1_workers = runtime.discover_concurrency if disjoint or not skip_known else 1
+    wave1_workers = _discover_concurrency(config, wave1_batches, skip_known_alive=skip_known)
     if skip_known and runtime.discover_concurrency > 1:
         logging.info(
             "discovery: overlapping batches — sequential discover with skip_known_alive",
@@ -124,8 +141,6 @@ def run_discovery_stage(
             wave1_workers,
         )
 
-    wave1_done = checkpoint.done_items("discover") if resume else set()
-    wave1_batches = batch_fn(all_targets)
     _run_discover_batches(
         stage="discover",
         checkpoint_key="discover",
@@ -168,6 +183,17 @@ def run_discovery_stage(
                 wave2_rate,
             )
             wave2_batches = batch_fn(gap)
+            wave2_disjoint = discovery.disjoint_batches and batches_are_disjoint(wave2_batches)
+            wave2_workers = _discover_concurrency(
+                config,
+                wave2_batches,
+                skip_known_alive=True,
+            )
+            if wave2_disjoint and wave2_workers > 1:
+                logging.info(
+                    "discovery wave2: disjoint batches — parallel discover (concurrency=%s)",
+                    wave2_workers,
+                )
             wave2_done = checkpoint.done_items("discover-wave2") if resume else set()
             _run_discover_batches(
                 stage="discover-wave2",
@@ -181,7 +207,7 @@ def run_discovery_stage(
                 retries=retries,
                 skip_discovery=False,
                 skip_known_alive=True,
-                concurrency=1,
+                concurrency=wave2_workers,
                 checkpoint=checkpoint,
                 done_ids=wave2_done,
             )
