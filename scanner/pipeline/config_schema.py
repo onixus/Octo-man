@@ -98,6 +98,13 @@ class HostnameResolveConfig(BaseModel):
     reverse: bool = True
 
 
+class DeltaDiscoveryConfig(BaseModel):
+    enabled: bool = False
+    previous_run_dir: str = ""
+    refresh_rate: float = Field(default=0.1, ge=0.0, le=1.0)
+    refresh_seed: int = Field(default=0, ge=0)
+
+
 class DiscoveryConfig(BaseModel):
     source: Literal["naabu"] = "naabu"
     # auto: derive from runtime.mode (safe→thorough, balanced→balanced, fast→fast)
@@ -115,6 +122,8 @@ class DiscoveryConfig(BaseModel):
     tcp_probe: TcpProbeDiscoveryConfig = Field(default_factory=TcpProbeDiscoveryConfig)
     probe_order: list[ProbeMethod] = Field(default_factory=lambda: list(_DEFAULT_PROBE_ORDER))
     hostnames: HostnameResolveConfig = Field(default_factory=HostnameResolveConfig)
+    seed_alive_file: str = ""
+    delta: DeltaDiscoveryConfig = Field(default_factory=DeltaDiscoveryConfig)
 
     @field_validator("probe_order")
     @classmethod

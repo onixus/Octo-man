@@ -136,6 +136,9 @@ def test_default_yaml_icmp_disabled():
     assert cfg.discovery.tcp_probe.enabled is False
     assert cfg.discovery.probe_order == ["icmp", "tcp", "naabu"]
     assert cfg.discovery.profile == "auto"
+    assert cfg.discovery.seed_alive_file == ""
+    assert cfg.discovery.delta.enabled is False
+    assert cfg.discovery.delta.refresh_rate == 0.1
 
 
 def test_probe_order_validation_rejects_unknown_step():

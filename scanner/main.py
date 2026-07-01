@@ -15,6 +15,11 @@ from scanner.pipeline.config_schema import AppConfig, format_validation_error, l
 from scanner.pipeline.discovery_profiles import apply_discovery_profile, resolve_discovery_profile_name
 from scanner.pipeline.contract import validate_inputs
 from scanner.pipeline.discovery_runner import run_discovery_stage, verify_alive_without_ports
+from scanner.pipeline.discovery_delta import (
+    load_previous_alive,
+    load_seed_alive,
+    resolve_previous_alive_file,
+)
 from scanner.pipeline.errors import StageFailureError
 from scanner.pipeline.hostnames import enrich_discovery_hostnames
 from scanner.pipeline.nse import run_nse
@@ -38,6 +43,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip NSE stage (discover + ports + reports only); re-run with --resume to enrich",
     )
+    parser.add_argument(
+        "--delta",
+        action="store_true",
+        help="Incremental discovery: probe only new scope hosts and refresh a sample of known alive",
+    )
     return parser.parse_args()
 
 
@@ -59,7 +69,26 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     profile_name = args.mode or config.runtime.mode
     discovery_preset = resolve_discovery_profile_name(config.discovery, profile_name) or "custom"
     config = apply_discovery_profile(config, active_mode=profile_name)
+    if args.delta:
+        config = config.model_copy(
+            update={
+                "discovery": config.discovery.model_copy(
+                    update={"delta": config.discovery.delta.model_copy(update={"enabled": True})}
+                )
+            }
+        )
     profile = config.profiles[profile_name]
+
+    output_base = Path(config.runtime.output_dir)
+    state_base = Path(config.runtime.state_dir)
+    previous_alive_file = None
+    if config.discovery.delta.enabled:
+        previous_alive_file = resolve_previous_alive_file(
+            output_base=output_base,
+            state_base=state_base,
+            previous_run_dir=config.discovery.delta.previous_run_dir,
+            per_run_output=config.runtime.per_run_output,
+        )
 
     try:
         paths = resolve_run_paths(config.runtime, run_id=args.run_id, resume=args.resume)
@@ -125,6 +154,9 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         return single_batch(items)
 
     alive_file = paths.output_dir / "alive_ips.txt"
+    seed_alive = load_seed_alive(config.discovery.seed_alive_file)
+    previous_alive = load_previous_alive(previous_alive_file)
+    previous_source = str(previous_alive_file) if previous_alive_file else ""
     if args.resume and checkpoint.is_done("discover"):
         alive_hosts = sorted(set(read_lines(alive_file)))
     else:
@@ -139,6 +171,9 @@ def _run_pipeline(args: argparse.Namespace) -> int:
             checkpoint=checkpoint,
             resume=args.resume,
             make_batches=make_batches,
+            seed_alive=seed_alive,
+            previous_alive=previous_alive,
+            previous_alive_source=previous_source,
         )
 
     hostnames_file = paths.output_dir / "hostnames.json"
