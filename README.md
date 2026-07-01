@@ -358,7 +358,15 @@ discovery:
   verify:
     enabled: false            # re-probe alive hosts with no open ports
     rate: 750                 # optional verify rate
+  icmp:
+    enabled: false            # fping pre-filter before naabu (large CIDRs)
+  tcp_probe:
+    enabled: false            # SYN probe on common ports (firewall-heavy nets)
+    ports: [80, 443, 22]
+  probe_order: [icmp, tcp, naabu]
 ```
+
+For **firewall-heavy** networks, enable `tcp_probe` (and optionally `icmp`) so hosts blocking ICMP still surface via TCP/80 or /443 before the full `naabu -sn` sweep. Per-method hit counts are written to `discovery_stats.json`.
 
 Wave-1 splits targets via `batching:` (same rules as ports). When batches are **disjoint**
 (e.g. `/22` → four `/24`s), discovery runs with `discover_concurrency` in parallel. Overlapping

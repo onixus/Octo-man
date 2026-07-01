@@ -68,6 +68,26 @@ class IcmpDiscoveryConfig(BaseModel):
     period_ms: int | None = Field(default=None, ge=0, le=10_000)
 
 
+class TcpProbeDiscoveryConfig(BaseModel):
+    enabled: bool = False
+    ports: list[int] = Field(default_factory=lambda: [80, 443, 22])
+    rate: int | None = Field(default=None, ge=1, le=100_000)
+
+    @field_validator("ports")
+    @classmethod
+    def validate_ports(cls, ports: list[int]) -> list[int]:
+        for port in ports:
+            if port < 1 or port > 65535:
+                raise ValueError(f"invalid TCP probe port: {port}")
+        if not ports:
+            raise ValueError("tcp_probe.ports must not be empty when tcp probe is used")
+        return ports
+
+
+ProbeMethod = Literal["icmp", "tcp", "naabu"]
+_DEFAULT_PROBE_ORDER: list[ProbeMethod] = ["icmp", "tcp", "naabu"]
+
+
 class HostnameResolveConfig(BaseModel):
     # Map alive IPs to input FQDNs from dns_resolution.json (resolve stage).
     forward: bool = True
@@ -87,7 +107,20 @@ class DiscoveryConfig(BaseModel):
     exclude_last_octets: list[int] = Field(default_factory=list)
     verify: VerifyDiscoveryConfig = Field(default_factory=VerifyDiscoveryConfig)
     icmp: IcmpDiscoveryConfig = Field(default_factory=IcmpDiscoveryConfig)
+    tcp_probe: TcpProbeDiscoveryConfig = Field(default_factory=TcpProbeDiscoveryConfig)
+    probe_order: list[ProbeMethod] = Field(default_factory=lambda: list(_DEFAULT_PROBE_ORDER))
     hostnames: HostnameResolveConfig = Field(default_factory=HostnameResolveConfig)
+
+    @field_validator("probe_order")
+    @classmethod
+    def validate_probe_order(cls, order: list[str]) -> list[str]:
+        if not order:
+            raise ValueError("probe_order must not be empty")
+        allowed = set(_DEFAULT_PROBE_ORDER)
+        for step in order:
+            if step not in allowed:
+                raise ValueError(f"unsupported probe_order step: {step}")
+        return order
 
 
 class PortsConfig(BaseModel):

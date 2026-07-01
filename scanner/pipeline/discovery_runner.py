@@ -11,6 +11,7 @@ from .checkpoint import CheckpointStore
 from .config_schema import AppConfig, ProfileConfig
 from .coverage_tracker import CoverageTracker, batches_are_disjoint
 from .discover import host_discovery
+from .probe_ladder import merge_discovery_stats
 from .protocol import parse_endpoint
 from .utils import read_lines, write_lines
 
@@ -78,7 +79,7 @@ def _run_discover_batches(
             skip_known_alive=skip_known_alive,
             max_pending_hosts=65536,
             tag=bid,
-            icmp=config.discovery.icmp,
+            discovery=config.discovery,
         )
 
     run_batches_parallel(
@@ -148,6 +149,13 @@ def run_discovery_stage(
             discovery.icmp.tool,
             discovery.icmp.timeout_ms,
         )
+    if discovery.tcp_probe.enabled and not discovery.skip_discovery:
+        logging.info(
+            "discovery: TCP probe enabled (ports=%s)",
+            discovery.tcp_probe.ports,
+        )
+    if not discovery.skip_discovery:
+        logging.info("discovery: probe ladder order=%s", discovery.probe_order)
 
     _run_discover_batches(
         stage="discover",
@@ -223,6 +231,9 @@ def run_discovery_stage(
             )
             alive_set = _apply_alive_filters(alive_set, config, alive_file)
         checkpoint.mark_done("discover-wave2")
+
+    if not discovery.skip_discovery:
+        merge_discovery_stats(output_dir)
 
     checkpoint.mark_done("discover")
     return sorted(alive_set)

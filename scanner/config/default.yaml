@@ -80,6 +80,10 @@ discovery:
     tool: fping
     timeout_ms: 500
     retries: 1
+  tcp_probe:
+    enabled: false
+    ports: [80, 443, 22]
+  probe_order: [icmp, tcp, naabu]
   hostnames:
     forward: true
     reverse: true
