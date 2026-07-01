@@ -7,13 +7,14 @@ Published container images receive tags for the current semver release (see [Rel
 
 | Version   | Supported |
 |-----------|-----------|
-| `0.1.x`   | Yes       |
+| `0.2.x`   | Yes       |
+| `0.1.x`   | Yes (security fixes only; upgrade to `0.2.x` recommended) |
 | `< 0.1.0` | No        |
 
 We recommend always using the latest image tag, for example:
 
 ```bash
-docker pull ghcr.io/onixus/octo-man:0.1.0
+docker pull ghcr.io/onixus/octo-man:0.2.0
 ```
 
 ## Reporting a vulnerability
