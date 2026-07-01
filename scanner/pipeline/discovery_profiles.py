@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from .config_schema import AppConfig, DiscoveryConfig, ProfileConfig
+from .config_schema import AppConfig, DiscoveryConfig
 
 DiscoveryProfileName = Literal["fast", "balanced", "thorough"]
 DiscoveryProfileSetting = Literal["auto", "fast", "balanced", "thorough", "custom"]

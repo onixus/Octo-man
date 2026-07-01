@@ -39,6 +39,7 @@ batching:
 
 discovery:
   source: naabu
+  profile: custom            # e2e: do not apply mode presets (fast CI scan)
   skip_discovery: false
 
 ports:
