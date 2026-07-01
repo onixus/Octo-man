@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from scanner.pipeline.config_schema import AppConfig, format_validation_error, load_config
+from scanner.pipeline.config_schema import AppConfig, DiscoveryConfig, format_validation_error, load_config
 
 
 def _minimal_config(**overrides: object) -> dict:
@@ -133,6 +133,13 @@ def test_default_yaml_icmp_disabled():
     assert cfg.discovery.icmp.enabled is False
     assert cfg.discovery.icmp.tool == "fping"
     assert cfg.discovery.icmp.timeout_ms == 500
+    assert cfg.discovery.tcp_probe.enabled is False
+    assert cfg.discovery.probe_order == ["icmp", "tcp", "naabu"]
+
+
+def test_probe_order_validation_rejects_unknown_step():
+    with pytest.raises(ValidationError):
+        DiscoveryConfig(probe_order=["icmp", "udp", "naabu"])
 
 
 def test_default_yaml_adaptive_discovery():
