@@ -9,7 +9,8 @@ from .batch_runner import run_batches_parallel
 from .batching import expand_batches, single_batch
 from .checkpoint import CheckpointStore
 from .config_schema import AppConfig, ProfileConfig
-from .coverage_tracker import CoverageTracker, batches_are_disjoint
+from .coverage_tracker import CoverageTracker, batches_are_disjoint, expand_target_ips
+from .discovery_delta import compute_delta_plan, write_delta_plan
 from .discover import host_discovery
 from .probe_ladder import merge_discovery_stats
 from .protocol import parse_endpoint
@@ -119,6 +120,9 @@ def run_discovery_stage(
     checkpoint: CheckpointStore,
     resume: bool,
     make_batches: Callable[[list[str]], list[tuple[str, list[str]]]] | None = None,
+    seed_alive: set[str] | None = None,
+    previous_alive: set[str] | None = None,
+    previous_alive_source: str = "",
 ) -> list[str]:
     """Run wave-1 (batched) and optional adaptive wave-2 host discovery."""
     if resume and checkpoint.is_done("discover"):
@@ -128,9 +132,45 @@ def run_discovery_stage(
     alive_set: set[str] = set(read_lines(alive_file)) if resume and alive_file.exists() else set()
     discovery = config.discovery
     runtime = config.runtime
+    delta = discovery.delta
+
+    wave1_members = all_targets
+    refresh_hosts: list[str] = []
+    if delta.enabled and not discovery.skip_discovery and not resume:
+        initial_alive, wave1_ips, refresh_hosts = compute_delta_plan(
+            all_targets,
+            seed_alive=seed_alive or set(),
+            previous_alive=previous_alive or set(),
+            refresh_rate=delta.refresh_rate,
+            refresh_seed=delta.refresh_seed,
+            max_scope_hosts=discovery.adaptive.max_gap_hosts,
+        )
+        alive_set.update(initial_alive)
+        wave1_members = wave1_ips
+        scope_count = len(
+            expand_target_ips(all_targets, max_hosts=discovery.adaptive.max_gap_hosts)
+        )
+        write_delta_plan(
+            output_dir,
+            scope_hosts=scope_count,
+            initial_alive=alive_set,
+            wave1_ips=wave1_ips,
+            refresh_ips=refresh_hosts,
+            previous_source=previous_alive_source,
+        )
+        logging.info(
+            "discovery delta: scope=%s initial_alive=%s wave1=%s refresh=%s",
+            scope_count,
+            len(initial_alive),
+            len(wave1_ips),
+            len(refresh_hosts),
+        )
+    elif seed_alive and not resume:
+        alive_set.update(seed_alive)
+        logging.info("discovery seed_alive: pre-seeded %s host(s)", len(seed_alive))
 
     wave1_done = checkpoint.done_items("discover") if resume else set()
-    wave1_batches = batch_fn(all_targets)
+    wave1_batches = batch_fn(wave1_members) if wave1_members else []
     disjoint = discovery.disjoint_batches and batches_are_disjoint(wave1_batches)
     skip_known = discovery.skip_known_alive and not disjoint
     wave1_workers = _discover_concurrency(config, wave1_batches, skip_known_alive=skip_known)
@@ -157,24 +197,59 @@ def run_discovery_stage(
     if not discovery.skip_discovery:
         logging.info("discovery: probe ladder order=%s", discovery.probe_order)
 
-    _run_discover_batches(
-        stage="discover",
-        checkpoint_key="discover",
-        batches=wave1_batches,
-        alive_set=alive_set,
-        alive_file=alive_file,
-        output_dir=output_dir,
-        rate=profile.discover_rate,
-        timeout=timeout,
-        retries=retries,
-        skip_discovery=discovery.skip_discovery,
-        skip_known_alive=skip_known,
-        concurrency=wave1_workers,
-        checkpoint=checkpoint,
-        done_ids=wave1_done,
-        config=config,
-    )
-    alive_set = _apply_alive_filters(alive_set, config, alive_file)
+    if wave1_batches:
+        _run_discover_batches(
+            stage="discover",
+            checkpoint_key="discover",
+            batches=wave1_batches,
+            alive_set=alive_set,
+            alive_file=alive_file,
+            output_dir=output_dir,
+            rate=profile.discover_rate,
+            timeout=timeout,
+            retries=retries,
+            skip_discovery=discovery.skip_discovery,
+            skip_known_alive=skip_known,
+            concurrency=wave1_workers,
+            checkpoint=checkpoint,
+            done_ids=wave1_done,
+            config=config,
+        )
+        alive_set = _apply_alive_filters(alive_set, config, alive_file)
+    elif not resume:
+        alive_set = _apply_alive_filters(alive_set, config, alive_file)
+
+    if (
+        delta.enabled
+        and not discovery.skip_discovery
+        and not (resume and checkpoint.is_done("discover-refresh"))
+    ):
+        if not refresh_hosts and resume:
+            refresh_hosts = read_lines(output_dir / "discover" / "delta.refresh.targets.txt")
+        if refresh_hosts:
+            probe_rate = max(500, profile.discover_rate // 4)
+            logging.info(
+                "discovery delta refresh: re-probing %s known host(s) at rate %s",
+                len(refresh_hosts),
+                probe_rate,
+            )
+            confirmed = host_discovery(
+                refresh_hosts,
+                output_dir=output_dir,
+                rate=probe_rate,
+                timeout=timeout,
+                retries=retries,
+                skip_discovery=False,
+                discovery=discovery,
+                tag="delta-refresh",
+            )
+            confirmed_set = set(confirmed)
+            for host in refresh_hosts:
+                if host not in confirmed_set:
+                    alive_set.discard(host)
+            alive_set.update(confirmed_set)
+            alive_set = _apply_alive_filters(alive_set, config, alive_file)
+        checkpoint.mark_done("discover-refresh")
 
     adaptive = discovery.adaptive
     if adaptive.enabled and not discovery.skip_discovery:
@@ -288,6 +363,7 @@ def verify_alive_without_ports(
         timeout=timeout,
         retries=retries,
         skip_discovery=False,
+        discovery=config.discovery,
         tag="verify",
     )
     confirmed_set = set(confirmed)

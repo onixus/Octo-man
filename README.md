@@ -379,6 +379,17 @@ For **firewall-heavy** networks, enable `tcp_probe` (and optionally `icmp`) so h
 
 Set `discovery.profile: custom` to keep YAML values without preset overrides.
 
+**Delta discovery** (`discovery.delta.enabled` or `--delta`): probes only hosts new to scope since the previous run's `alive_ips.txt`, plus a random refresh sample of known-alive hosts. Do not use on the first scan, after changing input ranges, or when you need a full baseline.
+
+```yaml
+discovery:
+  seed_alive_file: scanner/inputs/seed_alive.txt
+  delta:
+    enabled: false
+    previous_run_dir: ""      # default: latest per-run output
+    refresh_rate: 0.1         # fraction of known-alive to re-probe
+```
+
 Wave-1 splits targets via `batching:` (same rules as ports). When batches are **disjoint**
 (e.g. `/22` → four `/24`s), discovery runs with `discover_concurrency` in parallel. Overlapping
 batches force sequential discover with `skip_known_alive` to avoid duplicate probes. Adaptive

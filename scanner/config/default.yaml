@@ -88,6 +88,12 @@ discovery:
   hostnames:
     forward: true
     reverse: true
+  seed_alive_file: ""
+  delta:
+    enabled: false
+    previous_run_dir: ""
+    refresh_rate: 0.1
+    refresh_seed: 0
 
 ports:
   source: naabu
