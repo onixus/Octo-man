@@ -7,8 +7,10 @@ For a Russian version with extra operational recommendations, see [README.ru.md]
 
 Reproducible CLI pipeline for scanning large networks:
 - input: `CIDR + IP + FQDN`
-- stages: `resolve -> discovery -> fast ports -> Nmap NSE (service/OS detection + vuln/CVE)`
+- stages: `resolve -> discovery -> hostname enrichment -> fast ports -> Nmap NSE (service/OS detection + vuln/CVE)`
 - output: `JSON/JSONL/CSV` + `Markdown/HTML` summary
+
+Latest release: **[v0.2.0](https://github.com/onixus/Octo-man/releases/tag/v0.2.0)** — container image `ghcr.io/onixus/octo-man:0.2.0`.
 
 ## What It Implements
 
@@ -16,7 +18,10 @@ Reproducible CLI pipeline for scanning large networks:
 - Speed profiles: `safe`, `balanced`, `fast`.
 - DNS resolve for FQDN via `dnsx`.
 - Host discovery and fast port scan via `naabu` (TCP, UDP, or both).
+- **Probe ladder**: ordered ICMP (`fping`) → TCP SYN probe → naabu host discovery (`discovery.probe_order`).
 - **Adaptive discovery**: wave-1 batched sweep plus optional wave-2 gap fill for missed hosts.
+- **Discovery presets** (`discovery.profile: auto|fast|balanced|thorough|custom`) and **delta discovery** (`--delta`) for incremental scans vs a previous run.
+- **Hostname enrichment** (forward DNS map + reverse PTR via `dnsx`) between discovery and port scan.
 - **Disjoint-batch parallelism**: non-overlapping CIDR batches run discover in parallel; overlapping batches stay sequential with `skip_known_alive`.
 - **Deferred NSE** (`runtime.skip_nse` / `--skip-nse`): L1 run (discover + ports + reports), then `--resume` for enrichment.
 - Enrichment with Nmap `-sV`, OS detection (`-O`) and NSE profiles (incl. `vuln`).
@@ -36,8 +41,9 @@ Reproducible CLI pipeline for scanning large networks:
 - `scanner/pipeline/*`
 - `tests/{e2e,load}/` — CI integration tests
 - `scripts/{smoke.sh,load-test.sh}` — local helpers
-- `scanner/output/*` (generated)
-- `scanner/state/checkpoint.json` (generated; per-run under `scanner/state/runs/<run_id>/`)
+- `bench/{up,down,run-discovery,run-realistic}.sh` — local discovery benchmark lab
+- `scanner/output/*` (generated; per-run under `scanner/output/runs/<run_id>/` when enabled)
+- `scanner/state/checkpoint.json` (generated; per-run under `scanner/state/runs/<run_id>/` by default)
 
 ## Input Contract
 
@@ -91,6 +97,9 @@ Edit:
 docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced
 ```
 
+> `docker-compose.yml` defaults to `--mode fast` when you run `docker compose up scanner`
+> without overriding `command`. Examples below use `balanced` explicitly.
+
 ### 4) Resume after interruption
 
 ```bash
@@ -115,6 +124,19 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
 ```
 
 Or set `runtime.skip_nse: true` in the config. Useful for large networks: get alive hosts and open ports quickly, enrich in a second pass.
+
+### 6) Incremental (delta) discovery
+
+Re-probe only hosts new to scope since the previous run, plus a random refresh sample of
+known-alive hosts. Requires a prior full baseline scan with `per_run_output: true`:
+
+```bash
+docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced --delta
+```
+
+Or enable `discovery.delta.enabled: true` in the config. Optional `discovery.seed_alive_file`
+pre-seeds alive hosts from CMDB/DHCP before the first delta run. Do **not** use delta on the
+first scan, after changing input ranges, or when you need a full baseline.
 
 ## Configuration validation
 
@@ -234,17 +256,35 @@ tests/load/run.sh network-scan-cli:ci --hosts 32 --config tests/load/config-heav
 
 For a **real-network** load run against your own CIDR (outside CI), use `scripts/load-test.sh <cidr>`.
 
-### Local discovery benchmark (configs)
+### Local discovery benchmark (docker lab)
 
 Tuned discovery configs for throughput experiments:
 
 - `scanner/config/discovery-bench.yaml` — fast discovery profile, minimal NSE
 - `scanner/config/discovery-bench-realistic.yaml` — adaptive wave-2 + verify, closer to production
 
-Point `--ranges` / `--domains` at your targets (sample inputs under `scanner/inputs/bench/`).
-An optional docker lab harness (`bench/up.sh`, `bench/run-discovery.sh`) is provided in PR
-[#16](https://github.com/onixus/Octo-man/pull/16) to emulate a private network with nginx targets
-and emit JSON metrics (`hostname`, `cpu_count`, `mem_total_mb`, etc.).
+Sample inputs: `scanner/inputs/bench/`. The `bench/` harness emulates a private network with
+nginx targets and writes JSON metrics (`hostname`, `cpu_count`, `mem_total_mb`, `scan_mode`,
+`alive_containers`, `discover_sec`, etc.).
+
+```bash
+# 1) Bring up lab network + alive targets (default: 32 nginx on 10.99.0.0/22)
+bench/up.sh [alive_hosts] [target_count] [cidr|list]
+
+# 2) Run discovery benchmark (builds image if missing)
+bench/run-discovery.sh [alive_hosts] [target_count] [cidr|list]
+
+# 3) Realistic preset: 400 alive hosts, balanced mode, docker resource limits
+bench/run-realistic.sh [alive_hosts]
+
+# 4) Tear down network and containers
+bench/down.sh
+```
+
+Defaults and overrides live in `bench/env.defaults` (`BENCH_NET_NAME`, `BENCH_SUBNET`,
+`BENCH_CONFIG`, `BENCH_MODE`, …). Set `BENCH_DOCKER_LIMITS=1` to apply `--memory 8g` and
+`--cpus` caps (enabled by default in `run-realistic.sh`). Metrics land in
+`scanner/output/bench/<run_id>-metrics.json`.
 
 ### Image scanning & SBOM
 
@@ -281,10 +321,10 @@ docker run --rm \
   ghcr.io/onixus/octo-man:latest --config scanner/config/default.yaml --mode balanced
 ```
 
-To cut a release build, push a tag:
+To cut a release build, push a semver tag (triggers GHCR publish):
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
 > The GHCR package may be **private** by default; make it public (or authenticate
@@ -328,6 +368,7 @@ The NSE stage performs CVE/vulnerability checks driven by `nse_profiles`:
 
 - `vuln`: Nmap `vuln` category **plus** `vulners` — maps detected service versions (`-sV`) to CVEs via the vulners.com API. Wired to `balanced`/`fast`. **Requires outbound internet** for the vulners lookups.
 - `vuln-offline`: Nmap `vuln` category **plus** `vulscan` — offline CVE matching against bundled local databases (no internet). Select with `--mode` after setting it as a profile's `nse_profile`, or edit the profile.
+- `service_specific`: targeted scripts (`http-*`, `ssl-cert`, `smb-*`, `ssh-*`, `dns-*`) without OS detection — useful for focused service checks.
 - `baseline`: non-intrusive `default,safe` only (used by `safe`).
 
 The `nmap-vulners` and `vulscan` scripts are installed into the image at build time
@@ -393,8 +434,9 @@ discovery:
 Wave-1 splits targets via `batching:` (same rules as ports). When batches are **disjoint**
 (e.g. `/22` → four `/24`s), discovery runs with `discover_concurrency` in parallel. Overlapping
 batches force sequential discover with `skip_known_alive` to avoid duplicate probes. Adaptive
-wave-2 rescans hosts in the scope that wave-1 missed. Checkpoints: `discover` and `discover-wave2`
-batch ids.
+wave-2 rescans hosts in the scope that wave-1 missed. Delta refresh uses checkpoint stage
+`discover-refresh`. Checkpoints: `discover`, `discover-wave2`, `discover-refresh`, and
+`discover-hostnames` batch/stage ids.
 
 ### Scan protocol (TCP / UDP / TCP+UDP)
 
@@ -448,9 +490,10 @@ whole scan, and `--resume` only redoes what's left.
   effective network load scales with concurrency.
 - The NSE/OS stage is checkpointed **per host** — `--resume` skips hosts whose
   scan already completed.
-- Progress is tracked in `scanner/state/checkpoint.json` with stage flags and
-  per-item sets (`discover` / `discover-wave2` / `ports` batch ids, `nse` hosts).
-  Writes are atomic per item and thread-safe.
+- Progress is tracked in `scanner/state/runs/<run_id>/checkpoint.json` (or flat
+  `scanner/state/checkpoint.json` when `per_run_output: false`) with stage flags and
+  per-item sets (`discover` / `discover-wave2` / `discover-refresh` / `discover-hostnames`
+  / `ports` batch ids, `nse` hosts). Writes are atomic per item and thread-safe.
 
 Tune or disable batching under `batching:` in `scanner/config/default.yaml`
 (`enabled`, `ipv4_prefix`, `max_targets_per_batch`). Smaller `ipv4_prefix` means
@@ -458,23 +501,29 @@ finer resume granularity at the cost of more tool invocations.
 
 ## Output Artifacts
 
-- `scanner/output/normalized/ip_targets.txt`
-- `scanner/output/normalized/fqdn_targets.txt`
-- `scanner/output/normalized/contract_validation.json` (counts + rejected inputs)
-- `scanner/output/dns_resolution.json` / `scanner/output/dnsx_records.jsonl` (DNS resolve data)
-- `scanner/output/resolved_ips.txt`
-- `scanner/output/all_targets.txt`
-- `scanner/output/alive_ips.txt` (aggregated; per-batch files under `scanner/output/discover/`)
-- `scanner/output/open_ports.txt` (aggregated; per-batch files under `scanner/output/ports/`)
-- `scanner/output/nse_targets.txt`
-- `scanner/output/nmap/*` (`.nmap`, `.gnmap`, `.xml`)
-- `scanner/output/findings.{json,jsonl,csv}`
-- `scanner/output/os_findings.json` (parsed Nmap OS matches)
-- `scanner/output/script_findings.json` (all NSE script output)
-- `scanner/output/vulnerabilities.json` (structured CVE findings with `cvss`/`severity`, severity-ranked)
-- `scanner/output/vulnerabilities.csv` (same findings, flat CSV)
-- `scanner/output/summary.{json,md,html}` (includes severity breakdown)
-- `scanner/output/logs/pipeline.log`
+Paths below assume `runtime.per_run_output: true` (default); artifacts live under
+`scanner/output/runs/<run_id>/` unless noted.
+
+- `run_meta.json` — run id, profile, config path, timestamps
+- `normalized/ip_targets.txt`, `normalized/fqdn_targets.txt`
+- `normalized/contract_validation.json` (counts + rejected inputs)
+- `dns_resolution.json` / `dnsx_records.jsonl` (DNS resolve data)
+- `resolved_ips.txt`, `all_targets.txt`
+- `alive_ips.txt` (aggregated; per-batch files under `discover/`)
+- `discovery_stats.json` (probe-ladder hit counts: icmp / tcp / naabu)
+- `discovery_delta.json` (delta plan when `--delta` or `discovery.delta.enabled`)
+- `hostnames.json` (forward + reverse names per alive IP)
+- `open_ports.txt` (aggregated; per-batch files under `ports/`)
+- `nse_targets.txt`
+- `nmap/*` (`.nmap`, `.gnmap`, `.xml`; `nmap/tcp/` and `nmap/udp/` when applicable)
+- `findings.{json,jsonl,csv}`
+- `alive_hosts.json` (alive list with primary hostname, when hostnames enabled)
+- `os_findings.json` (parsed Nmap OS matches)
+- `script_findings.json` (all NSE script output)
+- `vulnerabilities.json` (structured CVE findings with `cvss`/`severity`, severity-ranked)
+- `vulnerabilities.csv` (same findings, flat CSV)
+- `summary.{json,md,html}` (includes severity breakdown and hostname counts)
+- `logs/pipeline.log`
 
 ## Notes
 
@@ -521,6 +570,7 @@ with every license below.
 | Package | License | Scope |
 |---|---|---|
 | PyYAML | MIT | runtime |
+| pydantic | MIT | runtime |
 | pytest | MIT | dev/test |
 | ruff | MIT | dev/lint |
 

@@ -3,11 +3,13 @@
 Основной README проекта: [README.md](README.md).  
 Этот файл — дополнительная русская версия с практическими рекомендациями по эксплуатации.
 
+Актуальный релиз: **[v0.2.0](https://github.com/onixus/Octo-man/releases/tag/v0.2.0)** — образ `ghcr.io/onixus/octo-man:0.2.0`.
+
 ## Назначение
 
 Решение выполняет контейнеризированный пайплайн для больших сетей:
 - вход: `CIDR + IP + FQDN`
-- этапы: `resolve -> discovery -> fast ports -> Nmap NSE (версии сервисов/ОС + уязвимости/CVE)`
+- этапы: `resolve -> discovery -> hostname enrichment -> fast ports -> Nmap NSE (версии сервисов/ОС + уязвимости/CVE)`
 - выход: `JSON/JSONL/CSV` + сводка `Markdown/HTML`
 
 ## Быстрый старт
@@ -30,6 +32,9 @@ docker compose build
 ```bash
 docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced
 ```
+
+> В `docker-compose.yml` по умолчанию задан `--mode fast` при запуске `docker compose up scanner`
+> без переопределения `command`. В примерах ниже явно указан `balanced`.
 
 ### 4) Возобновление после прерывания
 
@@ -55,6 +60,19 @@ docker compose run --rm scanner --config scanner/config/default.yaml --mode bala
 ```
 
 Или `runtime.skip_nse: true` в конфиге. Удобно для больших сетей: сначала живые хосты и порты, потом Nmap/NSE.
+
+### 6) Инкрементальный (delta) discovery
+
+Повторный проход только по новым хостам в scope и случайной выборке уже известных alive.
+Требует предыдущего полного baseline-прогона с `per_run_output: true`:
+
+```bash
+docker compose run --rm scanner --config scanner/config/default.yaml --mode balanced --delta
+```
+
+Или `discovery.delta.enabled: true` в конфиге. Опционально `discovery.seed_alive_file` —
+предзаполнение alive из CMDB/DHCP. **Не** используйте delta на первом скане, после смены
+диапазонов или когда нужен полный baseline.
 
 ## Валидация конфигурации
 
@@ -109,15 +127,17 @@ YAML проверяется при старте через **Pydantic** (`scanne
 ## Рекомендованный процесс для больших сетей
 
 1. **Нормализация целей**: валидация `CIDR/IP/FQDN`.
-2. **Resolve**: FQDN -> IP через `dnsx`.
-3. **Discovery (wave-1)**: определение живых хостов побатчево; при **disjoint** батчах — параллельно.
+2. **Resolve**: FQDN → IP через `dnsx`.
+3. **Discovery (wave-1)**: определение живых хостов побатчево; при **disjoint** батчах — параллельно. Probe ladder: ICMP → TCP SYN → naabu (`probe_order`).
 4. **Discovery (wave-2, adaptive)**: догон пропущенных хостов в scope (если `discovery.adaptive.enabled`).
-5. **Fast ports**: быстрый проход по `top-ports`/custom ports (побатчево).
-6. **Verify (опционально)**: повторный ping живых хостов без открытых портов (`discovery.verify`).
-7. **NSE/Nmap** (можно отложить через `--skip-nse`): углубление по найденным `host:port` — версии сервисов, **ОС (`-O`)**, **CVE (`vuln`/`vulners`/`vulscan`)**. Параллельный пул nmap.
-8. **Отчёты**: JSON/CSV + сводка с ОС и уязвимостями.
+5. **Hostname enrichment**: forward-имена из DNS + reverse PTR через `dnsx` → `hostnames.json`.
+6. **Fast ports**: быстрый проход по `top-ports`/custom ports (побатчево).
+7. **Verify (опционально)**: повторный ping живых хостов без открытых портов (`discovery.verify`).
+8. **NSE/Nmap** (можно отложить через `--skip-nse`): углубление по найденным `host:port` — версии сервисов, **ОС (`-O`)**, **CVE (`vuln`/`vulners`/`vulscan`)**. Параллельный пул nmap.
+9. **Отчёты**: JSON/CSV + сводка с ОС, hostname и уязвимостями.
 
-Двухфазный режим: `--skip-nse` → `--resume` (L1, затем enrichment).
+Двухфазный режим: `--skip-nse` → `--resume` (L1, затем enrichment).  
+Инкрементальный режим: `--delta` после baseline (см. выше).
 
 ## Батчинг и возобновление (resume)
 
@@ -134,8 +154,10 @@ YAML проверяется при старте через **Pydantic** (`scanne
   параллельный naabu использует `discover_rate` / `port_rate` профиля — суммарный
   сетевой шум ≈ `rate × concurrency`.
 - Этап NSE/OS чекпойнтится **по хостам** — `--resume` пропускает уже отсканированные.
-- Прогресс — в `scanner/state/checkpoint.json` (флаги стадий + множества элементов:
-  id батчей `discover` / `discover-wave2` / `ports`, хосты `nse`). Запись потокобезопасна и атомарна по элементу.
+- Прогресс — в `scanner/state/runs/<run_id>/checkpoint.json` (или плоский
+  `scanner/state/checkpoint.json` при `per_run_output: false`): флаги стадий + множества
+  элементов (id батчей `discover` / `discover-wave2` / `discover-refresh` /
+  `discover-hostnames`, батчи `ports`, хосты `nse`). Запись потокобезопасна и атомарна по элементу.
 
 Настройка/отключение — секция `batching:` в `scanner/config/default.yaml`
 (`enabled`, `ipv4_prefix`, `max_targets_per_batch`). Меньший `ipv4_prefix` — более
@@ -147,6 +169,7 @@ YAML проверяется при старте через **Pydantic** (`scanne
 
 ```yaml
 discovery:
+  profile: auto              # auto | fast | balanced | thorough | custom
   skip_discovery: false       # true — считать входные IP живыми (load test)
   skip_known_alive: true      # не сканировать уже найденные alive в следующих батчах
   disjoint_batches: true      # параллельный discover, если батчи не пересекаются
@@ -158,7 +181,34 @@ discovery:
   exclude_last_octets: []     # напр. [0, 255]
   verify:
     enabled: false            # повторный ping alive без открытых портов
+  icmp:
+    enabled: false            # fping pre-filter (крупные CIDR)
+  tcp_probe:
+    enabled: false            # SYN probe на типовых портах
+    ports: [80, 443, 22]
+  probe_order: [icmp, tcp, naabu]
+  hostnames:
+    forward: true
+    reverse: true
+  seed_alive_file: ""         # предзаполнение alive (CMDB/DHCP)
+  delta:
+    enabled: false
+    previous_run_dir: ""      # по умолчанию — последний per-run output
+    refresh_rate: 0.1         # доля known-alive для повторного probe
 ```
+
+**Presets** (`discovery.profile: auto` маппится из `runtime.mode` — `safe`→thorough, `balanced`→balanced, `fast`→fast):
+
+| Preset | Wave2 | Verify | ICMP | PTR | discover_rate |
+|--------|-------|--------|------|-----|---------------|
+| fast | skip если coverage ≥95% | off | off | off | ×1.5 |
+| balanced | gap ≥ min_gap | off | off | forward only | ×1 |
+| thorough | gap ≥ min_gap | on | on | forward+reverse | ×0.75 |
+
+`profile: custom` — значения из YAML без переопределения preset.
+
+Для **firewall-heavy** сетей включите `tcp_probe` (и при необходимости `icmp`), чтобы хосты
+без ICMP всё равно находились через TCP/80 или /443. Счётчики по методам — в `discovery_stats.json`.
 
 **Disjoint** батчи (напр. `/22` → четыре `/24`) идут параллельно с `discover_concurrency`.
 Пересекающиеся батчи — последовательно с `skip_known_alive`.
@@ -203,6 +253,7 @@ Checkpoint NSE: ключи `host/tcp` и `host/udp`. XML — в `nmap/tcp/` и `
 
 - `vuln` — категория Nmap `vuln` **+ `vulners`**: сопоставление версий сервисов (`-sV`) с CVE через API vulners.com. Привязан к `balanced`/`fast`. **Требует исходящего доступа в интернет**.
 - `vuln-offline` — категория `vuln` **+ `vulscan`**: офлайн-сопоставление CVE по локальным базам (интернет не нужен).
+- `service_specific` — точечные скрипты (`http-*`, `ssl-cert`, `smb-*`, `ssh-*`, `dns-*`) без OS detection.
 - `baseline` — только неинтрузивные `default,safe` (используется в `safe`).
 
 Скрипты `nmap-vulners` и `vulscan` ставятся в образ на этапе сборки (`Dockerfile`, версии пинуются через build-args `NMAP_VULNERS_REF` / `VULSCAN_REF`).
@@ -245,9 +296,19 @@ tests/load/run.sh network-scan-cli:ci --hosts 32 --config tests/load/config-heav
 Переменные окружения для `tests/load/run.sh`: `CHECKPOINT_TIMEOUT_SEC`, `SCAN_TIMEOUT_SEC`,
 `KEEP_WORK=1` (отладка, не удалять temp-директорию).
 
-- **Бенчмарк discovery** (конфиги на master): `scanner/config/discovery-bench.yaml`,
-  `discovery-bench-realistic.yaml`; входы — `scanner/inputs/bench/`. Docker-лаборатория
-  (`bench/up.sh`, `bench/run-discovery.sh`) — в PR [#16](https://github.com/onixus/Octo-man/pull/16).
+- **Бенчмарк discovery** (docker-лаборатория на master):
+
+```bash
+bench/up.sh [alive] [target_count] [cidr|list]   # поднять сеть + nginx-мишени
+bench/run-discovery.sh [alive] [target_count]    # прогон с metrics JSON
+bench/run-realistic.sh [alive]                   # preset: 400 alive, balanced, лимиты Docker
+bench/down.sh                                    # снести сеть и контейнеры
+```
+
+Конфиги: `scanner/config/discovery-bench.yaml`, `discovery-bench-realistic.yaml`;
+входы — `scanner/inputs/bench/`. Переменные — `bench/env.defaults` (`BENCH_SUBNET`,
+`BENCH_CONFIG`, `BENCH_DOCKER_LIMITS=1` для `--memory 8g`). Метрики:
+`scanner/output/bench/<run_id>-metrics.json`.
 
 - Модульные тесты чистых функций и парсеров (валидация входа, группировка портов,
   разбор `host:port` с IPv6, режимы TCP/UDP, adaptive discovery и coverage tracker,
@@ -274,13 +335,13 @@ ruff check scanner tests
   аттестации **SBOM + SLSA provenance**.
 - Публикация (`.github/workflows/docker-publish.yml`) собирает мультиарх-образ
   (`linux/amd64`, `linux/arm64`) и пушит его в GHCR по тегу `v*`, при релизе или вручную.
-- Готовый образ: `ghcr.io/onixus/octo-man` (теги `latest`, `vX.Y.Z`, `sha-<...>`).
+- Готовый образ: `ghcr.io/onixus/octo-man` (теги `latest`, `X.Y.Z`, `sha-<...>`).
 
 ```bash
-docker pull ghcr.io/onixus/octo-man:latest
+docker pull ghcr.io/onixus/octo-man:0.2.0
 ```
 
-Подробности и пример запуска — в [README.md](README.md#container-image-ghcr).
+Подробности и полный пример запуска — в [README.md](README.md#container-image-ghcr).
 
 ### Воспроизводимые сборки (пины)
 
@@ -295,6 +356,18 @@ docker pull ghcr.io/onixus/octo-man:latest
 релиза и коммит (`git ls-remote ... HEAD`), затем обновите соответствующие `FROM @sha256` /
 `ARG` в `Dockerfile`. Digest заморожен, поэтому периодически переустанавливайте его, чтобы
 получать обновления безопасности базового образа.
+
+## Артефакты вывода
+
+При `runtime.per_run_output: true` (по умолчанию) файлы лежат в `scanner/output/runs/<run_id>/`:
+
+- `run_meta.json`, `hostnames.json`, `discovery_stats.json`, `discovery_delta.json` (при `--delta`)
+- `alive_ips.txt`, `alive_hosts.json` (alive + hostname)
+- `open_ports.txt`, `findings.*`, `summary.{json,md,html}`
+- `vulnerabilities.json`, `os_findings.json`, `script_findings.json`
+- `nmap/*`, `logs/pipeline.log`
+
+Полный список — в [README.md](README.md#output-artifacts).
 
 ## Эксплуатационные замечания
 
@@ -341,6 +414,7 @@ docker pull ghcr.io/onixus/octo-man:latest
 | Пакет | Лицензия | Назначение |
 |---|---|---|
 | PyYAML | MIT | runtime |
+| pydantic | MIT | runtime |
 | pytest | MIT | dev/тесты |
 | ruff | MIT | dev/линт |
 
