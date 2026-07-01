@@ -12,6 +12,7 @@ from scanner.pipeline.batching import expand_batches, single_batch
 from scanner.pipeline.batch_runner import run_batches_parallel
 from scanner.pipeline.checkpoint import CheckpointStore
 from scanner.pipeline.config_schema import AppConfig, format_validation_error, load_config
+from scanner.pipeline.discovery_profiles import apply_discovery_profile, resolve_discovery_profile_name
 from scanner.pipeline.contract import validate_inputs
 from scanner.pipeline.discovery_runner import run_discovery_stage, verify_alive_without_ports
 from scanner.pipeline.errors import StageFailureError
@@ -56,6 +57,8 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         return exit_codes.CONFIG_ERROR
 
     profile_name = args.mode or config.runtime.mode
+    discovery_preset = resolve_discovery_profile_name(config.discovery, profile_name) or "custom"
+    config = apply_discovery_profile(config, active_mode=profile_name)
     profile = config.profiles[profile_name]
 
     try:
@@ -73,7 +76,14 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         max_bytes=config.runtime.log_max_bytes,
         backup_count=config.runtime.log_backup_count,
     )
-    logging.info("Starting scan pipeline in '%s' mode (run_id=%s, ports=%s)", profile_name, paths.run_id, config.ports.protocol)
+    logging.info(
+        "Starting scan pipeline in '%s' mode (discovery preset=%s, setting=%s, run_id=%s, ports=%s)",
+        profile_name,
+        discovery_preset,
+        config.discovery.profile,
+        paths.run_id,
+        config.ports.protocol,
+    )
     if not args.resume:
         write_run_meta(paths, profile_name, args.config)
 

@@ -65,6 +65,7 @@ batching:
 
 discovery:
   source: naabu
+  profile: auto              # auto | fast | balanced | thorough | custom
   skip_discovery: false
   skip_known_alive: true
   disjoint_batches: true
