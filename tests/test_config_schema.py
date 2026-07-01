@@ -125,6 +125,16 @@ def test_default_yaml_hostname_resolve():
     assert cfg.discovery.hostnames.reverse is True
 
 
+def test_default_yaml_icmp_disabled():
+    import yaml
+
+    text = Path("scanner/config/default.yaml").read_text(encoding="utf-8")
+    cfg = AppConfig.model_validate(yaml.safe_load(text))
+    assert cfg.discovery.icmp.enabled is False
+    assert cfg.discovery.icmp.tool == "fping"
+    assert cfg.discovery.icmp.timeout_ms == 500
+
+
 def test_default_yaml_adaptive_discovery():
     import yaml
 

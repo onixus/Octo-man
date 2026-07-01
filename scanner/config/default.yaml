@@ -75,6 +75,11 @@ discovery:
   exclude_last_octets: []
   verify:
     enabled: false
+  icmp:
+    enabled: false
+    tool: fping
+    timeout_ms: 500
+    retries: 1
   hostnames:
     forward: true
     reverse: true

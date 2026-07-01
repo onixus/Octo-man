@@ -63,6 +63,7 @@ def _run_discover_batches(
     concurrency: int,
     checkpoint: CheckpointStore,
     done_ids: set[str],
+    config: AppConfig,
 ) -> None:
     def _discover_batch(bid: str, members: list[str]) -> list[str]:
         known = set(alive_set) if skip_known_alive else None
@@ -77,6 +78,7 @@ def _run_discover_batches(
             skip_known_alive=skip_known_alive,
             max_pending_hosts=65536,
             tag=bid,
+            icmp=config.discovery.icmp,
         )
 
     run_batches_parallel(
@@ -140,6 +142,12 @@ def run_discovery_stage(
             "discovery: disjoint batches — parallel discover (concurrency=%s)",
             wave1_workers,
         )
+    if discovery.icmp.enabled and not discovery.skip_discovery:
+        logging.info(
+            "discovery: ICMP pre-filter enabled (tool=%s, timeout_ms=%s)",
+            discovery.icmp.tool,
+            discovery.icmp.timeout_ms,
+        )
 
     _run_discover_batches(
         stage="discover",
@@ -156,6 +164,7 @@ def run_discovery_stage(
         concurrency=wave1_workers,
         checkpoint=checkpoint,
         done_ids=wave1_done,
+        config=config,
     )
     alive_set = _apply_alive_filters(alive_set, config, alive_file)
 
@@ -210,6 +219,7 @@ def run_discovery_stage(
                 concurrency=wave2_workers,
                 checkpoint=checkpoint,
                 done_ids=wave2_done,
+                config=config,
             )
             alive_set = _apply_alive_filters(alive_set, config, alive_file)
         checkpoint.mark_done("discover-wave2")
